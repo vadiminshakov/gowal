@@ -12,6 +12,8 @@ import (
 
 const (
 	segmentThreshold = 1000
+
+	isInSyncDiskMode = false
 )
 
 var ErrExists = errors.New("msg with such index already exists")
@@ -116,9 +118,12 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to write msg to log")
 	}
-	//if err := c.msgs.Sync(); err != nil {
-	//	return errors.Wrap(err, "failed to sync msg log file")
-	//}
+
+	if isInSyncDiskMode {
+		if err := c.msgs.Sync(); err != nil {
+			return errors.Wrap(err, "failed to sync msg log file")
+		}
+	}
 
 	c.lastOffset += int64(c.buf.Len())
 	c.buf.Reset()
