@@ -54,26 +54,26 @@ type Wal struct {
 }
 
 func NewOnDiskLog(dir string) (*Wal, error) {
-	msgSegmentsNumbers, err := findSegmentNumber(dir, "msgs_")
+	segmentsNumbers, err := findSegmentNumber(dir, "msgs_")
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to find segment numbers")
 	}
 
 	// load them segments into mem
-	msgs, statMsgs, msgsIndex, err := segmentInfoAndIndex(msgSegmentsNumbers, path.Join(dir, "msgs_"))
+	msgs, statMsgs, index, err := segmentInfoAndIndex(segmentsNumbers, path.Join(dir, "msgs_"))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load msgs segments")
 	}
-	numberOfMsgsSegments := len(msgsIndex) / segmentThreshold
+	numberOfMsgsSegments := len(index) / segmentThreshold
 	if numberOfMsgsSegments == 0 {
 		numberOfMsgsSegments = 1
 	}
 
-	var bufMsgs bytes.Buffer
-	encMsgs := gob.NewEncoder(&bufMsgs)
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
 
-	return &Wal{msgs: msgs, index: msgsIndex, tmpIndex: make(map[uint64]msg.Msg),
-		buf: &bufMsgs, enc: encMsgs, lastOffset: statMsgs.Size(), pathToLogsDir: dir,
+	return &Wal{msgs: msgs, index: index, tmpIndex: make(map[uint64]msg.Msg),
+		buf: &buf, enc: enc, lastOffset: statMsgs.Size(), pathToLogsDir: dir,
 		segmentsNumber: numberOfMsgsSegments}, nil
 }
 
