@@ -53,7 +53,7 @@ type Wal struct {
 	segmentsNumber int
 }
 
-func NewOnDiskLog(dir string) (*Wal, error) {
+func NewWAL(dir string) (*Wal, error) {
 	segmentsNumbers, err := findSegmentNumber(dir, "msgs_")
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to find segment numbers")
