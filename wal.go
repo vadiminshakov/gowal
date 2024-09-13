@@ -31,11 +31,11 @@ type Wal struct {
 	msgs *os.File
 
 	// index that matches height of msg record with offset in file
-	indexMsgs    map[uint64]msg.Msg
-	tmpIndexMsgs map[uint64]msg.Msg
+	index    map[uint64]msg.Msg
+	tmpIndex map[uint64]msg.Msg
 
 	// gob encoder for proposed messages
-	encMsgs *gob.Encoder
+	enc *gob.Encoder
 
 	// buffer for proposed messages
 	bufMsgs *bytes.Buffer
@@ -60,7 +60,7 @@ func NewOnDiskLog(dir string) (*Wal, error) {
 	}
 
 	// load them segments into mem
-	msgs, statMsgs, msgsIndex, err := segmentInfoAndIndexMsg(msgSegmentsNumbers, path.Join(dir, "msgs_"))
+	msgs, statMsgs, msgsIndex, err := segmentInfoAndIndex(msgSegmentsNumbers, path.Join(dir, "msgs_"))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load msgs segments")
 	}
@@ -72,26 +72,26 @@ func NewOnDiskLog(dir string) (*Wal, error) {
 	var bufMsgs bytes.Buffer
 	encMsgs := gob.NewEncoder(&bufMsgs)
 
-	return &Wal{msgs: msgs, indexMsgs: msgsIndex, tmpIndexMsgs: make(map[uint64]msg.Msg),
-		bufMsgs: &bufMsgs, encMsgs: encMsgs, lastOffsetMsgs: statMsgs.Size(), pathToLogsDir: dir,
+	return &Wal{msgs: msgs, index: msgsIndex, tmpIndex: make(map[uint64]msg.Msg),
+		bufMsgs: &bufMsgs, enc: encMsgs, lastOffsetMsgs: statMsgs.Size(), pathToLogsDir: dir,
 		segmentsNumberMsgs: numberOfMsgsSegments}, nil
 }
 
 // Set writes key/value pair to the msgs log.
 func (c *Wal) Set(index uint64, key string, value []byte) error {
-	if _, ok := c.indexMsgs[index]; ok {
+	if _, ok := c.index[index]; ok {
 		return ErrExists
 	}
 
 	// rotate segment if threshold is reached
 	// (close current segment, open new one with incremented suffix in name)
-	itemsAddedTotal := len(c.indexMsgs)
+	itemsAddedTotal := len(c.index)
 	if itemsAddedTotal > maxSegments*segmentThreshold {
 		itemsAddedTotal = itemsAddedTotal + (c.segmentsNumberMsgs-1)*segmentThreshold
 	}
 	if itemsAddedTotal == segmentThreshold*c.segmentsNumberMsgs {
 		c.bufMsgs.Reset()
-		c.encMsgs = gob.NewEncoder(c.bufMsgs)
+		c.enc = gob.NewEncoder(c.bufMsgs)
 		if err := c.msgs.Close(); err != nil {
 			return errors.Wrap(err, "failed to close msgs log file")
 		}
@@ -111,7 +111,7 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 	}
 
 	// gob encode key and value
-	if err := c.encMsgs.Encode(msg.Msg{Key: key, Value: value, Idx: index}); err != nil {
+	if err := c.enc.Encode(msg.Msg{Key: key, Value: value, Idx: index}); err != nil {
 		return errors.Wrap(err, "failed to encode msg for log")
 	}
 	// write to log at last offset
@@ -127,9 +127,9 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 	c.bufMsgs.Reset()
 
 	// update index
-	c.indexMsgs[index] = msg.Msg{Key: key, Value: value, Idx: index}
+	c.index[index] = msg.Msg{Key: key, Value: value, Idx: index}
 
-	c.rotateSegmentMsgs(msg.Msg{Key: key, Value: value, Idx: index})
+	c.rotateSegments(msg.Msg{Key: key, Value: value, Idx: index})
 
 	return nil
 }
@@ -145,7 +145,7 @@ func (c *Wal) oldestSegmentName(numberOfSegments int) string {
 
 // Get queries value at specific index in the msgs log.
 func (c *Wal) Get(index uint64) (string, []byte, bool) {
-	msg, ok := c.indexMsgs[index]
+	msg, ok := c.index[index]
 	if !ok {
 		return "", nil, false
 	}

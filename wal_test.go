@@ -36,7 +36,7 @@ func TestLoadIndexMsg(t *testing.T) {
 	stat, err := log.msgs.Stat()
 	require.NoError(t, err)
 
-	index, err := loadIndexesMsg(log.msgs, stat)
+	index, err := loadIndexes(log.msgs, stat)
 	require.NoError(t, err)
 
 	for i := 0; i < 10; i++ {
@@ -62,7 +62,7 @@ func TestSegmentRotationForMsgs(t *testing.T) {
 
 	// now we have only one segment on disk with tmpIndexBufferThreshold+10 msgs,
 	// load it in the memory
-	index, err := loadIndexesMsg(log.msgs, stat)
+	index, err := loadIndexes(log.msgs, stat)
 	require.NoError(t, err)
 
 	// check all saved msgs in the index
@@ -90,8 +90,8 @@ func TestServiceDownUpAndRepairIndex(t *testing.T) {
 	require.NoError(t, err)
 
 	for i := 0; i < segmentThreshold+(segmentThreshold/2); i++ {
-		require.Equal(t, "key"+strconv.Itoa(i), log.indexMsgs[uint64(i)].Key)
-		require.Equal(t, "value"+strconv.Itoa(i), string(log.indexMsgs[uint64(i)].Value))
+		require.Equal(t, "key"+strconv.Itoa(i), log.index[uint64(i)].Key)
+		require.Equal(t, "value"+strconv.Itoa(i), string(log.index[uint64(i)].Value))
 	}
 
 	require.NoError(t, os.RemoveAll("./testlogdata"))

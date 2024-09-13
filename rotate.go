@@ -6,19 +6,19 @@ import (
 	"os"
 )
 
-// rotateSegmentMsgs rotates msgs segment if threshold is reached.
+// rotateSegments rotates msgs segment if threshold is reached.
 // If number of items in index file exceeds threshold, start writing to tmp index buffer.
-func (c *Wal) rotateSegmentMsgs(newMsg msg.Msg) {
+func (c *Wal) rotateSegments(newMsg msg.Msg) {
 	multiplier := 1
 	if c.segmentsNumberMsgs > 1 {
 		multiplier = c.segmentsNumberMsgs - 1
 	}
 	// if threshold is reached, start writing to tmp index buffer
-	if len(c.indexMsgs) > segmentThreshold*multiplier {
+	if len(c.index) > segmentThreshold*multiplier {
 		// if segments number exceeds the limit, flush tmp index to main index and rm oldest segment
 		if c.segmentsNumberMsgs > maxSegments {
-			c.indexMsgs = c.tmpIndexMsgs
-			c.tmpIndexMsgs = make(map[uint64]msg.Msg)
+			c.index = c.tmpIndex
+			c.tmpIndex = make(map[uint64]msg.Msg)
 
 			go func(segmentName string) {
 				if err := os.Remove(segmentName); err != nil {
@@ -27,7 +27,7 @@ func (c *Wal) rotateSegmentMsgs(newMsg msg.Msg) {
 			}(c.oldestMsgsSegmentName)
 			return
 		}
-		c.tmpIndexMsgs[newMsg.Index()] = newMsg
+		c.tmpIndex[newMsg.Index()] = newMsg
 	}
 
 	return

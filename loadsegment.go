@@ -14,9 +14,9 @@ import (
 	"strings"
 )
 
-// segmentInfoAndIndexMsg loads segment info (file descriptor, name, size, etc) and index from segment files for msgs log.
-// Works like loadSegmentMsg, but for multiple segments.
-func segmentInfoAndIndexMsg(segNumbers []int, path string) (*os.File, os.FileInfo, map[uint64]msg.Msg, error) {
+// segmentInfoAndIndex loads segment info (file descriptor, name, size, etc) and index from segment files for msgs log.
+// Works like loadSegment, but for multiple segments.
+func segmentInfoAndIndex(segNumbers []int, path string) (*os.File, os.FileInfo, map[uint64]msg.Msg, error) {
 	index := make(map[uint64]msg.Msg)
 	var (
 		logFileFD      *os.File
@@ -25,7 +25,7 @@ func segmentInfoAndIndexMsg(segNumbers []int, path string) (*os.File, os.FileInf
 		err            error
 	)
 	for _, segindex := range segNumbers {
-		logFileFD, logFileInfo, idxFromSegment, err = loadSegmentMsg(path + strconv.Itoa(segindex))
+		logFileFD, logFileInfo, idxFromSegment, err = loadSegment(path + strconv.Itoa(segindex))
 		if err != nil {
 			return nil, nil, nil, errors.Wrap(err, "failed to load indexes from msg log file")
 		}
@@ -37,7 +37,7 @@ func segmentInfoAndIndexMsg(segNumbers []int, path string) (*os.File, os.FileInf
 }
 
 // loadSegment loads segment info (file descriptor, name, size, etc) and index from segment file.
-func loadSegmentMsg(path string) (fd *os.File, fileinfo os.FileInfo, index map[uint64]msg.Msg, err error) {
+func loadSegment(path string) (fd *os.File, fileinfo os.FileInfo, index map[uint64]msg.Msg, err error) {
 	fd, err = os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0755)
 	if err != nil {
 		return nil, nil, nil, errors.Wrap(err, "failed to open log segment file")
@@ -48,7 +48,7 @@ func loadSegmentMsg(path string) (fd *os.File, fileinfo os.FileInfo, index map[u
 		return nil, nil, nil, errors.Wrap(err, "failed to read log segment file stat")
 	}
 
-	index, err = loadIndexesMsg(fd, fileinfo)
+	index, err = loadIndexes(fd, fileinfo)
 	if err != nil {
 		return nil, nil, nil, errors.Wrap(err, "failed to build index from log segment")
 	}
@@ -95,8 +95,8 @@ func findSegmentNumber(dir string, prefix string) (msgSegmentsNumbers []int, err
 	return msgSegmentsNumbers, nil
 }
 
-// loadIndexesMsg loads index from log file.
-func loadIndexesMsg(file *os.File, stat os.FileInfo) (map[uint64]msg.Msg, error) {
+// loadIndexes loads index from log file.
+func loadIndexes(file *os.File, stat os.FileInfo) (map[uint64]msg.Msg, error) {
 	buf := make([]byte, stat.Size())
 	if n, err := file.Read(buf); err != nil {
 		if len(buf) == 0 && n == 0 && err == io.EOF {
