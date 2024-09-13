@@ -12,13 +12,12 @@ import (
 
 const (
 	segmentThreshold = 1000
+	maxSegments      = 5
 
 	isInSyncDiskMode = false
 )
 
 var ErrExists = errors.New("msg with such index already exists")
-
-const maxSegments = 5
 
 // Wal is used to store votes and msgs on disk.
 //
