@@ -86,9 +86,6 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 	// rotate segment if threshold is reached
 	// (close current segment, open new one with incremented suffix in name)
 	itemsAddedTotal := len(c.index)
-	if itemsAddedTotal > maxSegments*segmentThreshold {
-		itemsAddedTotal = itemsAddedTotal + (c.segmentsNumber-1)*segmentThreshold
-	}
 	if itemsAddedTotal == segmentThreshold*c.segmentsNumber {
 		c.buf.Reset()
 		c.enc = gob.NewEncoder(c.buf)
@@ -98,14 +95,14 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 
 		c.oldestSegName = c.oldestSegmentName(c.segmentsNumber)
 
-		segmentIndex, err := extractSegmentNum(c.msgs.Name())
+		segmentNumber, err := extractSegmentNum(c.msgs.Name())
 		if err != nil {
 			return errors.Wrap(err, "failed to extract segment number from msgs log file name")
 		}
 
-		segmentIndex++
-		c.msgs, err = os.OpenFile(path.Join(c.pathToLogsDir, "msgs_"+strconv.Itoa(segmentIndex)), os.O_RDWR|os.O_CREATE, 0755)
-		c.segmentsNumber = segmentIndex + 1
+		segmentNumber++
+		c.msgs, err = os.OpenFile(path.Join(c.pathToLogsDir, "msgs_"+strconv.Itoa(segmentNumber)), os.O_RDWR|os.O_CREATE, 0755)
+		c.segmentsNumber = segmentNumber + 1
 
 		c.lastOffset = 0
 	}
