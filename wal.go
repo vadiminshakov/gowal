@@ -43,14 +43,14 @@ type Wal struct {
 	// path to directory with logs
 	pathToLogsDir string
 
-	// name of the old segment for msgs log
-	oldestMsgsSegmentName string
+	// name of the old segment
+	oldestSegName string
 
-	// offset of last msg record in file
-	lastOffsetMsgs int64
+	// offset of last record in file
+	lastOffset int64
 
 	// number of segments for msgs log
-	segmentsNumberMsgs int
+	segmentsNumber int
 }
 
 func NewOnDiskLog(dir string) (*Wal, error) {
@@ -73,8 +73,8 @@ func NewOnDiskLog(dir string) (*Wal, error) {
 	encMsgs := gob.NewEncoder(&bufMsgs)
 
 	return &Wal{msgs: msgs, index: msgsIndex, tmpIndex: make(map[uint64]msg.Msg),
-		buf: &bufMsgs, enc: encMsgs, lastOffsetMsgs: statMsgs.Size(), pathToLogsDir: dir,
-		segmentsNumberMsgs: numberOfMsgsSegments}, nil
+		buf: &bufMsgs, enc: encMsgs, lastOffset: statMsgs.Size(), pathToLogsDir: dir,
+		segmentsNumber: numberOfMsgsSegments}, nil
 }
 
 // Set writes key/value pair to the msgs log.
@@ -87,16 +87,16 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 	// (close current segment, open new one with incremented suffix in name)
 	itemsAddedTotal := len(c.index)
 	if itemsAddedTotal > maxSegments*segmentThreshold {
-		itemsAddedTotal = itemsAddedTotal + (c.segmentsNumberMsgs-1)*segmentThreshold
+		itemsAddedTotal = itemsAddedTotal + (c.segmentsNumber-1)*segmentThreshold
 	}
-	if itemsAddedTotal == segmentThreshold*c.segmentsNumberMsgs {
+	if itemsAddedTotal == segmentThreshold*c.segmentsNumber {
 		c.buf.Reset()
 		c.enc = gob.NewEncoder(c.buf)
 		if err := c.msgs.Close(); err != nil {
 			return errors.Wrap(err, "failed to close msgs log file")
 		}
 
-		c.oldestMsgsSegmentName = c.oldestSegmentName(c.segmentsNumberMsgs)
+		c.oldestSegName = c.oldestSegmentName(c.segmentsNumber)
 
 		segmentIndex, err := extractSegmentNum(c.msgs.Name())
 		if err != nil {
@@ -105,9 +105,9 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 
 		segmentIndex++
 		c.msgs, err = os.OpenFile(path.Join(c.pathToLogsDir, "msgs_"+strconv.Itoa(segmentIndex)), os.O_RDWR|os.O_CREATE, 0755)
-		c.segmentsNumberMsgs = segmentIndex + 1
+		c.segmentsNumber = segmentIndex + 1
 
-		c.lastOffsetMsgs = 0
+		c.lastOffset = 0
 	}
 
 	// gob encode key and value
@@ -115,7 +115,7 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 		return errors.Wrap(err, "failed to encode msg for log")
 	}
 	// write to log at last offset
-	_, err := c.msgs.WriteAt(c.buf.Bytes(), c.lastOffsetMsgs)
+	_, err := c.msgs.WriteAt(c.buf.Bytes(), c.lastOffset)
 	if err != nil {
 		return errors.Wrap(err, "failed to write msg to log")
 	}
@@ -123,7 +123,7 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 	//	return errors.Wrap(err, "failed to sync msg log file")
 	//}
 
-	c.lastOffsetMsgs += int64(c.buf.Len())
+	c.lastOffset += int64(c.buf.Len())
 	c.buf.Reset()
 
 	// update index
