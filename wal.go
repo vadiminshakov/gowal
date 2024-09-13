@@ -38,7 +38,7 @@ type Wal struct {
 	enc *gob.Encoder
 
 	// buffer for proposed messages
-	bufMsgs *bytes.Buffer
+	buf *bytes.Buffer
 
 	// path to directory with logs
 	pathToLogsDir string
@@ -73,7 +73,7 @@ func NewOnDiskLog(dir string) (*Wal, error) {
 	encMsgs := gob.NewEncoder(&bufMsgs)
 
 	return &Wal{msgs: msgs, index: msgsIndex, tmpIndex: make(map[uint64]msg.Msg),
-		bufMsgs: &bufMsgs, enc: encMsgs, lastOffsetMsgs: statMsgs.Size(), pathToLogsDir: dir,
+		buf: &bufMsgs, enc: encMsgs, lastOffsetMsgs: statMsgs.Size(), pathToLogsDir: dir,
 		segmentsNumberMsgs: numberOfMsgsSegments}, nil
 }
 
@@ -90,8 +90,8 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 		itemsAddedTotal = itemsAddedTotal + (c.segmentsNumberMsgs-1)*segmentThreshold
 	}
 	if itemsAddedTotal == segmentThreshold*c.segmentsNumberMsgs {
-		c.bufMsgs.Reset()
-		c.enc = gob.NewEncoder(c.bufMsgs)
+		c.buf.Reset()
+		c.enc = gob.NewEncoder(c.buf)
 		if err := c.msgs.Close(); err != nil {
 			return errors.Wrap(err, "failed to close msgs log file")
 		}
@@ -115,7 +115,7 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 		return errors.Wrap(err, "failed to encode msg for log")
 	}
 	// write to log at last offset
-	_, err := c.msgs.WriteAt(c.bufMsgs.Bytes(), c.lastOffsetMsgs)
+	_, err := c.msgs.WriteAt(c.buf.Bytes(), c.lastOffsetMsgs)
 	if err != nil {
 		return errors.Wrap(err, "failed to write msg to log")
 	}
@@ -123,8 +123,8 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 	//	return errors.Wrap(err, "failed to sync msg log file")
 	//}
 
-	c.lastOffsetMsgs += int64(c.bufMsgs.Len())
-	c.bufMsgs.Reset()
+	c.lastOffsetMsgs += int64(c.buf.Len())
+	c.buf.Reset()
 
 	// update index
 	c.index[index] = msg.Msg{Key: key, Value: value, Idx: index}
