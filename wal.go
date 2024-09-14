@@ -24,7 +24,7 @@ var ErrExists = errors.New("msg with such index already exists")
 // Log is append-only, so we can't delete records from it, but log is divided into segments, which are rotated (oldest deleted) when
 // segments number threshold is reached.
 // Log is divided into two parts: msgs log and votes log. Each part has its own index, which is used to find record by its height.
-// Index is stored in memory and loaded from disk on startup.
+// Index is stored in memory and loaded from disk on Wal init.
 //
 // This code is intentionally monomorphized for msgs and votes, generics can slow the app and make code more complicated.
 type Wal struct {
