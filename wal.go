@@ -19,7 +19,7 @@ const (
 
 var ErrExists = errors.New("msg with such index already exists")
 
-// Wal is used to store votes and msgs on disk.
+// Wal is used to msgs on disk.
 //
 // Log is append-only, so we can't delete records from it, but log is divided into segments, which are rotated (oldest deleted) when
 // segments number threshold is reached.
