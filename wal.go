@@ -54,14 +54,14 @@ type Wal struct {
 	segmentsNumber int
 }
 
-func NewWAL(dir string) (*Wal, error) {
-	segmentsNumbers, err := findSegmentNumber(dir, "msgs_")
+func NewWAL(dir string, prefix string) (*Wal, error) {
+	segmentsNumbers, err := findSegmentNumber(dir, prefix)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to find segment numbers")
 	}
 
 	// load them segments into mem
-	msgs, statMsgs, index, err := segmentInfoAndIndex(segmentsNumbers, path.Join(dir, "msgs_"))
+	msgs, statMsgs, index, err := segmentInfoAndIndex(segmentsNumbers, path.Join(dir, prefix))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load msgs segments")
 	}

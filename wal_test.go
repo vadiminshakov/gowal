@@ -8,7 +8,7 @@ import (
 )
 
 func TestSetGet(t *testing.T) {
-	log, err := NewWAL("./testlogdata")
+	log, err := NewWAL("./testlogdata", "log_")
 	require.NoError(t, err)
 
 	for i := 0; i < 10; i++ {
@@ -26,7 +26,7 @@ func TestSetGet(t *testing.T) {
 }
 
 func TestLoadIndexMsg(t *testing.T) {
-	log, err := NewWAL("./testlogdata")
+	log, err := NewWAL("./testlogdata", "log_")
 	require.NoError(t, err)
 
 	for i := 0; i < 10; i++ {
@@ -48,7 +48,7 @@ func TestLoadIndexMsg(t *testing.T) {
 }
 
 func TestSegmentRotationForMsgs(t *testing.T) {
-	log, err := NewWAL("./testlogdata")
+	log, err := NewWAL("./testlogdata", "log_")
 	require.NoError(t, err)
 	segmentsNumber := 6
 	// here we exceed the segment size threshold (segmentThreshold), create new segment, keep old segment on disk until tmpIndexBufferThreshold
@@ -77,7 +77,7 @@ func TestSegmentRotationForMsgs(t *testing.T) {
 
 // create two segments, app down, up and repair index.
 func TestServiceDownUpAndRepairIndex(t *testing.T) {
-	log, err := NewWAL("./testlogdata")
+	log, err := NewWAL("./testlogdata", "log_")
 	require.NoError(t, err)
 
 	for i := 0; i < segmentThreshold+(segmentThreshold/2); i++ {
@@ -86,7 +86,7 @@ func TestServiceDownUpAndRepairIndex(t *testing.T) {
 
 	require.NoError(t, log.Close())
 
-	log, err = NewWAL("./testlogdata")
+	log, err = NewWAL("./testlogdata", "log_")
 	require.NoError(t, err)
 
 	for i := 0; i < segmentThreshold+(segmentThreshold/2); i++ {
