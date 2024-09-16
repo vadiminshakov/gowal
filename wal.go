@@ -86,8 +86,7 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 
 	// rotate segment if threshold is reached
 	// (close current segment, open new one with incremented suffix in name)
-	itemsAddedTotal := len(c.index)
-	if itemsAddedTotal == segmentThreshold*c.segmentsNumber {
+	if len(c.index) == segmentThreshold*c.segmentsNumber {
 		c.buf.Reset()
 		c.enc = gob.NewEncoder(c.buf)
 		if err := c.msgs.Close(); err != nil {
