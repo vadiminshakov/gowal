@@ -52,6 +52,9 @@ type Wal struct {
 
 	// number of segments for msgs log
 	segmentsNumber int
+
+	// prefix for segment files
+	prefix string
 }
 
 func NewWAL(dir string, prefix string) (*Wal, error) {
@@ -75,7 +78,7 @@ func NewWAL(dir string, prefix string) (*Wal, error) {
 
 	return &Wal{msgs: msgs, index: index, tmpIndex: make(map[uint64]msg.Msg),
 		buf: &buf, enc: enc, lastOffset: statMsgs.Size(), pathToLogsDir: dir,
-		segmentsNumber: numberOfMsgsSegments}, nil
+		segmentsNumber: numberOfMsgsSegments, prefix: prefix}, nil
 }
 
 // Set writes key/value pair to the msgs log.
@@ -101,7 +104,7 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 		}
 
 		segmentNumber++
-		c.msgs, err = os.OpenFile(path.Join(c.pathToLogsDir, "msgs_"+strconv.Itoa(segmentNumber)), os.O_RDWR|os.O_CREATE, 0755)
+		c.msgs, err = os.OpenFile(path.Join(c.pathToLogsDir, c.prefix+strconv.Itoa(segmentNumber)), os.O_RDWR|os.O_CREATE, 0755)
 		c.segmentsNumber = segmentNumber + 1
 
 		c.lastOffset = 0
