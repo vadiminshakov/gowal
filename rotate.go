@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-// rotateSegments rotates msgs segment if threshold is reached.
+// rotateSegments rotates log segment if threshold is reached.
 // If number of items in index file exceeds threshold, start writing to tmp index buffer.
 func (c *Wal) rotateSegments(newMsg msg.Msg) {
 	multiplier := 1

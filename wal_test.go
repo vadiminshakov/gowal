@@ -33,10 +33,10 @@ func TestLoadIndexMsg(t *testing.T) {
 		require.NoError(t, log.Set(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
 	}
 
-	stat, err := log.msgs.Stat()
+	stat, err := log.log.Stat()
 	require.NoError(t, err)
 
-	index, err := loadIndexes(log.msgs, stat)
+	index, err := loadIndexes(log.log, stat)
 	require.NoError(t, err)
 
 	for i := 0; i < 10; i++ {
@@ -52,21 +52,21 @@ func TestSegmentRotationForMsgs(t *testing.T) {
 	require.NoError(t, err)
 	segmentsNumber := 6
 	// here we exceed the segment size threshold (segmentThreshold), create new segment, keep old segment on disk until tmpIndexBufferThreshold
-	// is reached, then del old segment and write 10 more msgs
+	// is reached, then del old segment and write 10 more log
 	for i := 0; i < segmentThreshold*segmentsNumber+10; i++ {
 		require.NoError(t, log.Set(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
 	}
 
-	stat, err := log.msgs.Stat()
+	stat, err := log.log.Stat()
 	require.NoError(t, err)
 
-	// now we have only one segment on disk with tmpIndexBufferThreshold+10 msgs,
+	// now we have only one segment on disk with tmpIndexBufferThreshold+10 log,
 	// load it in the memory
-	index, err := loadIndexes(log.msgs, stat)
+	index, err := loadIndexes(log.log, stat)
 	require.NoError(t, err)
 
-	// check all saved msgs in the index
-	// we have all msgs with height greater than segmentThreshold and less than segmentThreshold+(tmpIndexBufferThreshold+10)
+	// check all saved log in the index
+	// we have all log with height greater than segmentThreshold and less than segmentThreshold+(tmpIndexBufferThreshold+10)
 	for i := segmentThreshold * segmentsNumber; i < segmentThreshold*segmentsNumber+10; i++ {
 		require.Equal(t, "key"+strconv.Itoa(i), index[uint64(i)].Key)
 		require.Equal(t, "value"+strconv.Itoa(i), string(index[uint64(i)].Value))

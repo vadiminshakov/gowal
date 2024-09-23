@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-// segmentInfoAndIndex loads segment info (file descriptor, name, size, etc) and index from segment files for msgs log.
+// segmentInfoAndIndex loads segment info (file descriptor, name, size, etc) and index from segment files for log log.
 // Works like loadSegment, but for multiple segments.
 func segmentInfoAndIndex(segNumbers []int, path string) (*os.File, os.FileInfo, map[uint64]msg.Msg, error) {
 	index := make(map[uint64]msg.Msg)
@@ -57,7 +57,7 @@ func loadSegment(path string) (fd *os.File, fileinfo os.FileInfo, index map[uint
 }
 
 // findSegmentNumbers finds all segment numbers in the directory.
-func findSegmentNumber(dir string, prefix string) (msgSegmentsNumbers []int, err error) {
+func findSegmentNumber(dir string, prefix string) (segmentsNumbers []int, err error) {
 	_, err = os.Stat(dir)
 	if os.IsNotExist(err) {
 		if err := os.Mkdir(dir, 0755); err != nil {
@@ -69,7 +69,7 @@ func findSegmentNumber(dir string, prefix string) (msgSegmentsNumbers []int, err
 		return nil, errors.Wrap(err, "failed to read dir for wal")
 	}
 
-	msgSegmentsNumbers = make([]int, 0)
+	segmentsNumbers = make([]int, 0)
 	for _, d := range de {
 		if d.IsDir() {
 			continue
@@ -80,19 +80,19 @@ func findSegmentNumber(dir string, prefix string) (msgSegmentsNumbers []int, err
 				return nil, errors.Wrap(err, "initialization failed: failed to extract segment number from wal file name")
 			}
 
-			msgSegmentsNumbers = append(msgSegmentsNumbers, i)
+			segmentsNumbers = append(segmentsNumbers, i)
 		}
 	}
 
-	sort.Slice(msgSegmentsNumbers, func(i, j int) bool {
-		return msgSegmentsNumbers[i] < msgSegmentsNumbers[j]
+	sort.Slice(segmentsNumbers, func(i, j int) bool {
+		return segmentsNumbers[i] < segmentsNumbers[j]
 	})
 
-	if len(msgSegmentsNumbers) == 0 {
-		msgSegmentsNumbers = append(msgSegmentsNumbers, 0)
+	if len(segmentsNumbers) == 0 {
+		segmentsNumbers = append(segmentsNumbers, 0)
 	}
 
-	return msgSegmentsNumbers, nil
+	return segmentsNumbers, nil
 }
 
 // loadIndexes loads index from log file.
@@ -130,7 +130,7 @@ func loadIndexes(file *os.File, stat os.FileInfo) (map[uint64]msg.Msg, error) {
 func extractSegmentNum(segmentName string) (int, error) {
 	_, suffix, ok := strings.Cut(segmentName, "_")
 	if !ok {
-		return 0, fmt.Errorf("failed to cut suffix from msgs log file name %s", segmentName)
+		return 0, fmt.Errorf("failed to cut suffix from log log file name %s", segmentName)
 	}
 	i, err := strconv.Atoi(suffix)
 	if err != nil {

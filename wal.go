@@ -19,17 +19,17 @@ const (
 
 var ErrExists = errors.New("msg with such index already exists")
 
-// Wal is used to msgs on disk.
+// Wal is used to log on disk.
 //
 // Log is append-only, so we can't delete records from it, but log is divided into segments, which are rotated (oldest deleted) when
 // segments number threshold is reached.
-// Log is divided into two parts: msgs log and votes log. Each part has its own index, which is used to find record by its height.
+// Log is divided into two parts: log log and votes log. Each part has its own index, which is used to find record by its height.
 // Index is stored in memory and loaded from disk on Wal init.
 //
-// This code is intentionally monomorphized for msgs and votes, generics can slow the app and make code more complicated.
+// This code is intentionally monomorphized for log and votes, generics can slow the app and make code more complicated.
 type Wal struct {
 	// append-only log with proposed messages that node consumed
-	msgs *os.File
+	log *os.File
 
 	// index that matches height of msg record with offset in file
 	index    map[uint64]msg.Msg
@@ -50,7 +50,7 @@ type Wal struct {
 	// offset of last record in file
 	lastOffset int64
 
-	// number of segments for msgs log
+	// number of segments for log log
 	segmentsNumber int
 
 	// prefix for segment files
@@ -64,24 +64,24 @@ func NewWAL(dir string, prefix string) (*Wal, error) {
 	}
 
 	// load them segments into mem
-	msgs, statMsgs, index, err := segmentInfoAndIndex(segmentsNumbers, path.Join(dir, prefix))
+	fd, stat, index, err := segmentInfoAndIndex(segmentsNumbers, path.Join(dir, prefix))
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to load msgs segments")
+		return nil, errors.Wrap(err, "failed to load log segments")
 	}
-	numberOfMsgsSegments := len(index) / segmentThreshold
-	if numberOfMsgsSegments == 0 {
-		numberOfMsgsSegments = 1
+	numberOfSegments := len(index) / segmentThreshold
+	if numberOfSegments == 0 {
+		numberOfSegments = 1
 	}
 
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
 
-	return &Wal{msgs: msgs, index: index, tmpIndex: make(map[uint64]msg.Msg),
-		buf: &buf, enc: enc, lastOffset: statMsgs.Size(), pathToLogsDir: dir,
-		segmentsNumber: numberOfMsgsSegments, prefix: prefix}, nil
+	return &Wal{log: fd, index: index, tmpIndex: make(map[uint64]msg.Msg),
+		buf: &buf, enc: enc, lastOffset: stat.Size(), pathToLogsDir: dir,
+		segmentsNumber: numberOfSegments, prefix: prefix}, nil
 }
 
-// Set writes key/value pair to the msgs log.
+// Set writes key/value pair to the log log.
 func (c *Wal) Set(index uint64, key string, value []byte) error {
 	if _, ok := c.index[index]; ok {
 		return ErrExists
@@ -92,19 +92,19 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 	if len(c.index) == segmentThreshold*c.segmentsNumber {
 		c.buf.Reset()
 		c.enc = gob.NewEncoder(c.buf)
-		if err := c.msgs.Close(); err != nil {
-			return errors.Wrap(err, "failed to close msgs log file")
+		if err := c.log.Close(); err != nil {
+			return errors.Wrap(err, "failed to close log log file")
 		}
 
 		c.oldestSegName = c.oldestSegmentName(c.segmentsNumber)
 
-		segmentNumber, err := extractSegmentNum(c.msgs.Name())
+		segmentNumber, err := extractSegmentNum(c.log.Name())
 		if err != nil {
-			return errors.Wrap(err, "failed to extract segment number from msgs log file name")
+			return errors.Wrap(err, "failed to extract segment number from log log file name")
 		}
 
 		segmentNumber++
-		c.msgs, err = os.OpenFile(path.Join(c.pathToLogsDir, c.prefix+strconv.Itoa(segmentNumber)), os.O_RDWR|os.O_CREATE, 0755)
+		c.log, err = os.OpenFile(path.Join(c.pathToLogsDir, c.prefix+strconv.Itoa(segmentNumber)), os.O_RDWR|os.O_CREATE, 0755)
 		c.segmentsNumber = segmentNumber + 1
 
 		c.lastOffset = 0
@@ -115,13 +115,13 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 		return errors.Wrap(err, "failed to encode msg for log")
 	}
 	// write to log at last offset
-	_, err := c.msgs.WriteAt(c.buf.Bytes(), c.lastOffset)
+	_, err := c.log.WriteAt(c.buf.Bytes(), c.lastOffset)
 	if err != nil {
 		return errors.Wrap(err, "failed to write msg to log")
 	}
 
 	if isInSyncDiskMode {
-		if err := c.msgs.Sync(); err != nil {
+		if err := c.log.Sync(); err != nil {
 			return errors.Wrap(err, "failed to sync msg log file")
 		}
 	}
@@ -143,10 +143,10 @@ func (c *Wal) oldestSegmentName(numberOfSegments int) string {
 	if numberOfSegments >= maxSegments {
 		latestSegmentIndex = numberOfSegments - maxSegments
 	}
-	return path.Join(c.pathToLogsDir, "msgs_"+strconv.Itoa(int(latestSegmentIndex)))
+	return path.Join(c.pathToLogsDir, c.prefix+strconv.Itoa(int(latestSegmentIndex)))
 }
 
-// Get queries value at specific index in the msgs log.
+// Get queries value at specific index in the log log.
 func (c *Wal) Get(index uint64) (string, []byte, bool) {
 	msg, ok := c.index[index]
 	if !ok {
@@ -156,14 +156,15 @@ func (c *Wal) Get(index uint64) (string, []byte, bool) {
 	return msg.Key, msg.Value, true
 }
 
+// CurrentIndex returns current index of the log.
 func (c *Wal) CurrentIndex() uint64 {
 	return uint64(len(c.index))
 }
 
 // Close closes log files.
 func (c *Wal) Close() error {
-	if err := c.msgs.Close(); err != nil {
-		return errors.Wrap(err, "failed to close msgs log file")
+	if err := c.log.Close(); err != nil {
+		return errors.Wrap(err, "failed to close log log file")
 	}
 	return nil
 }
