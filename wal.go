@@ -156,6 +156,10 @@ func (c *Wal) Get(index uint64) (string, []byte, bool) {
 	return msg.Key, msg.Value, true
 }
 
+func (c *Wal) CurrentIndex() uint64 {
+	return uint64(len(c.index))
+}
+
 // Close closes log files.
 func (c *Wal) Close() error {
 	if err := c.msgs.Close(); err != nil {
