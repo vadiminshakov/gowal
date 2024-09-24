@@ -7,6 +7,7 @@ import (
 	"github.com/vadiminshakov/gowal/msg"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 )
 
@@ -154,6 +155,31 @@ func (c *Wal) Get(index uint64) (string, []byte, bool) {
 	}
 
 	return msg.Key, msg.Value, true
+}
+
+func (c *Wal) Iterator() func() (msg.Msg, bool) {
+	indexes := make([]uint64, 0, len(c.index))
+
+	for k := range c.index {
+		indexes = append(indexes, k)
+	}
+
+	sort.Slice(indexes, func(i, j int) bool {
+		return indexes[i] < indexes[j]
+	})
+
+	i := 0
+
+	return func() (msg.Msg, bool) {
+		if i >= len(indexes) {
+			return msg.Msg{}, false
+		}
+
+		msg := c.index[indexes[i]]
+		i++
+
+		return msg, true
+	}
 }
 
 // CurrentIndex returns current index of the log.
