@@ -25,6 +25,28 @@ func TestSetGet(t *testing.T) {
 	require.NoError(t, os.RemoveAll("./testlogdata"))
 }
 
+func TestIterator(t *testing.T) {
+	log, err := NewWAL("./testlogdata", "log_")
+	require.NoError(t, err)
+
+	for i := 0; i < 10; i++ {
+		require.NoError(t, log.Set(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+	}
+
+	iter := log.Iterator()
+	for i := 0; i < 10; i++ {
+		msg, ok := iter()
+		require.True(t, ok)
+		require.Equal(t, "key"+strconv.Itoa(i), msg.Key)
+		require.Equal(t, "value"+strconv.Itoa(i), string(msg.Value))
+	}
+
+	_, ok := iter()
+	require.False(t, ok)
+
+	require.NoError(t, os.RemoveAll("./testlogdata"))
+}
+
 func TestLoadIndexMsg(t *testing.T) {
 	log, err := NewWAL("./testlogdata", "log_")
 	require.NoError(t, err)
