@@ -157,6 +157,10 @@ func (c *Wal) Get(index uint64) (string, []byte, bool) {
 	return msg.Key, msg.Value, true
 }
 
+// Iterator returns iterator for the WAL messages.
+// It returns function that returns next message and bool flag,
+// which is false if there are no more messages.
+// Messages are returned from the oldest to the newest.
 func (c *Wal) Iterator() func() (msg.Msg, bool) {
 	indexes := make([]uint64, 0, len(c.index))
 
