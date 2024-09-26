@@ -55,6 +55,17 @@ if !found {
 }
 ```
 
+### Iterating over log entries
+
+You can iterate over all log entries using the `Iterate` function:
+
+```go
+iter := log.Iterator()
+for msg, ok := iter() ; ok; msg, ok = iter() {
+    log.Printf("Key: %s, Value: %s\n", msg.Key, string(msg.Value))
+}
+```
+
 ### Closing the WAL
 Always ensure that you close the WAL instance to properly flush and close the log files:
 
