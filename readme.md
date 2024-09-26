@@ -60,7 +60,7 @@ if !found {
 You can iterate over all log entries using the `Iterate` function:
 
 ```go
-iter := log.Iterator()
+iter := wal.Iterator()
 for msg, ok := iter() ; ok; msg, ok = iter() {
     log.Printf("Key: %s, Value: %s\n", msg.Key, string(msg.Value))
 }
