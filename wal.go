@@ -64,7 +64,7 @@ func NewWAL(dir string, prefix string) (*Wal, error) {
 		return nil, errors.Wrap(err, "failed to find segment numbers")
 	}
 
-	// load them segments into mem
+	// load segments into mem
 	fd, stat, index, err := segmentInfoAndIndex(segmentsNumbers, path.Join(dir, prefix))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load log segments")
