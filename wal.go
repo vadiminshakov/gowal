@@ -51,21 +51,35 @@ type Wal struct {
 	// offset of last record in file
 	lastOffset int64
 
-	// number of segments for log log
+	// number of segments for log
 	segmentsNumber int
 
 	// prefix for segment files
 	prefix string
+
+	segmentsThreshold int
+
+	maxSegments int
+
+	isInSyncDiskMode bool
 }
 
-func NewWAL(dir string, prefix string) (*Wal, error) {
-	segmentsNumbers, err := findSegmentNumber(dir, prefix)
+type Config struct {
+	Dir              string
+	Prefix           string
+	SegmentThreshold int
+	MaxSegments      int
+	IsInSyncDiskMode bool
+}
+
+func NewWAL(config Config) (*Wal, error) {
+	segmentsNumbers, err := findSegmentNumber(config.Dir, config.Prefix)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to find segment numbers")
 	}
 
 	// load segments into mem
-	fd, stat, index, err := segmentInfoAndIndex(segmentsNumbers, path.Join(dir, prefix))
+	fd, stat, index, err := segmentInfoAndIndex(segmentsNumbers, path.Join(config.Dir, config.Prefix))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load log segments")
 	}
@@ -78,8 +92,9 @@ func NewWAL(dir string, prefix string) (*Wal, error) {
 	enc := gob.NewEncoder(&buf)
 
 	return &Wal{log: fd, index: index, tmpIndex: make(map[uint64]msg.Msg),
-		buf: &buf, enc: enc, lastOffset: stat.Size(), pathToLogsDir: dir,
-		segmentsNumber: numberOfSegments, prefix: prefix}, nil
+		buf: &buf, enc: enc, lastOffset: stat.Size(), pathToLogsDir: config.Dir,
+		segmentsNumber: numberOfSegments, prefix: config.Prefix, segmentsThreshold: config.SegmentThreshold,
+		maxSegments: config.MaxSegments, isInSyncDiskMode: config.IsInSyncDiskMode}, nil
 }
 
 // Set writes key/value pair to the log log.
