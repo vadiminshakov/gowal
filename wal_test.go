@@ -8,7 +8,13 @@ import (
 )
 
 func TestSetGet(t *testing.T) {
-	log, err := NewWAL("./testlogdata", "log_")
+	log, err := NewWAL(Config{
+		Dir:              "./testlogdata",
+		Prefix:           "log_",
+		SegmentThreshold: 10,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
 	require.NoError(t, err)
 
 	for i := 0; i < 10; i++ {
@@ -26,7 +32,13 @@ func TestSetGet(t *testing.T) {
 }
 
 func TestIterator(t *testing.T) {
-	log, err := NewWAL("./testlogdata", "log_")
+	log, err := NewWAL(Config{
+		Dir:              "./testlogdata",
+		Prefix:           "log_",
+		SegmentThreshold: 10,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
 	require.NoError(t, err)
 
 	for i := 0; i < 10; i++ {
@@ -48,7 +60,13 @@ func TestIterator(t *testing.T) {
 }
 
 func TestLoadIndexMsg(t *testing.T) {
-	log, err := NewWAL("./testlogdata", "log_")
+	log, err := NewWAL(Config{
+		Dir:              "./testlogdata",
+		Prefix:           "log_",
+		SegmentThreshold: 10,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
 	require.NoError(t, err)
 
 	for i := 0; i < 10; i++ {
@@ -70,8 +88,17 @@ func TestLoadIndexMsg(t *testing.T) {
 }
 
 func TestSegmentRotationForMsgs(t *testing.T) {
-	log, err := NewWAL("./testlogdata", "log_")
+	segmentThreshold := 10
+
+	log, err := NewWAL(Config{
+		Dir:              "./testlogdata",
+		Prefix:           "log_",
+		SegmentThreshold: segmentThreshold,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
 	require.NoError(t, err)
+
 	segmentsNumber := 6
 	// here we exceed the segment size threshold (segmentThreshold), create new segment, keep old segment on disk until tmpIndexBufferThreshold
 	// is reached, then del old segment and write 10 more log
@@ -99,7 +126,15 @@ func TestSegmentRotationForMsgs(t *testing.T) {
 
 // create two segments, app down, up and repair index.
 func TestServiceDownUpAndRepairIndex(t *testing.T) {
-	log, err := NewWAL("./testlogdata", "log_")
+	segmentThreshold := 10
+
+	log, err := NewWAL(Config{
+		Dir:              "./testlogdata",
+		Prefix:           "log_",
+		SegmentThreshold: 10,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
 	require.NoError(t, err)
 
 	for i := 0; i < segmentThreshold+(segmentThreshold/2); i++ {
@@ -108,7 +143,13 @@ func TestServiceDownUpAndRepairIndex(t *testing.T) {
 
 	require.NoError(t, log.Close())
 
-	log, err = NewWAL("./testlogdata", "log_")
+	log, err = NewWAL(Config{
+		Dir:              "./testlogdata",
+		Prefix:           "log_",
+		SegmentThreshold: 10,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
 	require.NoError(t, err)
 
 	for i := 0; i < segmentThreshold+(segmentThreshold/2); i++ {
