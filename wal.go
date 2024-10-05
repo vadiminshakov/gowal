@@ -73,6 +73,10 @@ type Config struct {
 }
 
 func NewWAL(config Config) (*Wal, error) {
+	if err := os.MkdirAll(config.Dir, 0755); err != nil {
+		return nil, errors.Wrap(err, "failed to create log directory")
+	}
+
 	segmentsNumbers, err := findSegmentNumber(config.Dir, config.Prefix)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to find segment numbers")
