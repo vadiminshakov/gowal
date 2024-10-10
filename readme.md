@@ -77,11 +77,11 @@ if err != nil {
 ```
 
 ### Configuration
-The behavior of the WAL can be configured using several constants:
+The behavior of the WAL can be configured using several configuration options (`Config` parameter in the `NewWAL` function):
 
- - `segmentThreshold`: Maximum number of log entries per segment before rotation occurs. Default is 1000.
- - `maxSegments`: Maximum number of segments to keep before the oldest segments are deleted. Default is 5.
- - `isInSyncDiskMode`: When set to true, every write is synced to disk, ensuring durability at the cost of performance. Default is false.
+ - `SegmentThreshold`: Maximum number of log entries per segment before rotation occurs. Default is 1000.
+ - `MaxSegments`: Maximum number of segments to keep before the oldest segments are deleted. Default is 5.
+ - `IsInSyncDiskMode`: When set to true, every write is synced to disk, ensuring durability at the cost of performance. Default is false.
 
 ### Contributing
 Feel free to open issues or submit pull requests for improvements and bug fixes. We welcome contributions!
