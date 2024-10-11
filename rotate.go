@@ -14,9 +14,9 @@ func (c *Wal) rotateSegments(newMsg msg.Msg) {
 		multiplier = c.segmentsNumber - 1
 	}
 	// if threshold is reached, start writing to tmp index buffer
-	if len(c.index) > segmentThreshold*multiplier {
+	if len(c.index) > c.segmentsThreshold*multiplier {
 		// if segments number exceeds the limit, flush tmp index to main index and rm oldest segment
-		if c.segmentsNumber > maxSegments {
+		if c.segmentsNumber > c.maxSegments {
 			c.index = c.tmpIndex
 			c.tmpIndex = make(map[uint64]msg.Msg)
 

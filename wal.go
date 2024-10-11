@@ -11,13 +11,6 @@ import (
 	"strconv"
 )
 
-const (
-	segmentThreshold = 1000
-	maxSegments      = 5
-
-	isInSyncDiskMode = false
-)
-
 var ErrExists = errors.New("msg with such index already exists")
 
 // Wal is used to log on disk.
@@ -87,7 +80,7 @@ func NewWAL(config Config) (*Wal, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load log segments")
 	}
-	numberOfSegments := len(index) / segmentThreshold
+	numberOfSegments := len(index) / config.SegmentThreshold
 	if numberOfSegments == 0 {
 		numberOfSegments = 1
 	}
@@ -140,7 +133,7 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 		return errors.Wrap(err, "failed to write msg to log")
 	}
 
-	if isInSyncDiskMode {
+	if c.isInSyncDiskMode {
 		if err := c.log.Sync(); err != nil {
 			return errors.Wrap(err, "failed to sync msg log file")
 		}
@@ -160,8 +153,8 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 // oldestSegmentName returns name of the oldest segment in the directory.
 func (c *Wal) oldestSegmentName(numberOfSegments int) string {
 	latestSegmentIndex := 0
-	if numberOfSegments >= maxSegments {
-		latestSegmentIndex = numberOfSegments - maxSegments
+	if numberOfSegments >= c.maxSegments {
+		latestSegmentIndex = numberOfSegments - c.maxSegments
 	}
 	return path.Join(c.pathToLogsDir, c.prefix+strconv.Itoa(int(latestSegmentIndex)))
 }
