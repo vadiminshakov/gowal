@@ -43,14 +43,14 @@ func loadSegment(path string) (fd *os.File, fileinfo os.FileInfo, index map[uint
 		return nil, nil, nil, errors.Wrap(err, "failed to open log segment file")
 	}
 
+	index, err = loadIndexes(fd)
+	if err != nil {
+		return nil, nil, nil, errors.Wrap(err, "failed to build index from log segment")
+	}
+
 	fileinfo, err = fd.Stat()
 	if err != nil {
 		return nil, nil, nil, errors.Wrap(err, "failed to read log segment file stat")
-	}
-
-	index, err = loadIndexes(fd, fileinfo)
-	if err != nil {
-		return nil, nil, nil, errors.Wrap(err, "failed to build index from log segment")
 	}
 
 	return fd, fileinfo, index, nil
@@ -96,26 +96,27 @@ func findSegmentNumber(dir string, prefix string) (segmentsNumbers []int, err er
 }
 
 // loadIndexes loads index from log file.
-func loadIndexes(file *os.File, stat os.FileInfo) (map[uint64]msg.Msg, error) {
-	buf := make([]byte, stat.Size())
-	if n, err := file.Read(buf); err != nil {
-		if len(buf) == 0 && n == 0 && err == io.EOF {
-			return make(map[uint64]msg.Msg), nil
-		} else if err != io.EOF {
-			return nil, errors.Wrap(err, "failed to read log file")
-		}
+func loadIndexes(file *os.File) (map[uint64]msg.Msg, error) {
+	buf, err := io.ReadAll(file)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to read log file")
+	}
+
+	if len(buf) == 0 {
+		return make(map[uint64]msg.Msg), nil
 	}
 
 	var msgs []msg.Msg
 	dec := gob.NewDecoder(bytes.NewReader(buf))
 	for {
 		var msgIndexed msg.Msg
-		if err := dec.Decode(&msgIndexed); err != nil {
+		if err = dec.Decode(&msgIndexed); err != nil {
 			if err == io.EOF {
 				break
 			}
 			return nil, errors.Wrap(err, "failed to decode indexed msg from log")
 		}
+
 		msgs = append(msgs, msgIndexed)
 	}
 
