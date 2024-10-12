@@ -3,6 +3,7 @@ package gowal
 import (
 	"bytes"
 	"encoding/gob"
+	"fmt"
 	"github.com/pkg/errors"
 	"github.com/vadiminshakov/gowal/msg"
 	"os"
@@ -94,69 +95,80 @@ func NewWAL(config Config) (*Wal, error) {
 		maxSegments: config.MaxSegments, isInSyncDiskMode: config.IsInSyncDiskMode}, nil
 }
 
-// Set writes key/value pair to the log log.
+// Set writes key-value pair to the log.
 func (c *Wal) Set(index uint64, key string, value []byte) error {
-	if _, ok := c.index[index]; ok {
-		return ErrExists
+	if _, exists := c.index[index]; exists {
+		return ErrExists // Предотвращаем дублирование индексов
 	}
 
-	// rotate segment if threshold is reached
-	// (close current segment, open new one with incremented suffix in name)
-	if len(c.index) == c.segmentsThreshold*c.segmentsNumber {
-		c.buf.Reset()
-		c.enc = gob.NewEncoder(c.buf)
-		if err := c.log.Close(); err != nil {
-			return errors.Wrap(err, "failed to close log log file")
-		}
-
-		c.oldestSegName = c.oldestSegmentName(c.segmentsNumber)
-
-		segmentNumber, err := extractSegmentNum(c.log.Name())
-		if err != nil {
-			return errors.Wrap(err, "failed to extract segment number from log log file name")
-		}
-
-		segmentNumber++
-		c.log, err = os.OpenFile(path.Join(c.pathToLogsDir, c.prefix+strconv.Itoa(segmentNumber)), os.O_RDWR|os.O_CREATE, 0755)
-		c.segmentsNumber = segmentNumber + 1
-
-		c.lastOffset = 0
+	if err := c.rotateIfNeeded(index, key, value); err != nil {
+		return err
 	}
 
-	// gob encode key and value
 	if err := c.enc.Encode(msg.Msg{Key: key, Value: value, Idx: index}); err != nil {
-		return errors.Wrap(err, "failed to encode msg for log")
+		return errors.Wrap(err, "failed to encode msg")
 	}
-	// write to log at last offset
-	_, err := c.log.WriteAt(c.buf.Bytes(), c.lastOffset)
-	if err != nil {
+
+	if _, err := c.log.WriteAt(c.buf.Bytes(), c.lastOffset); err != nil {
 		return errors.Wrap(err, "failed to write msg to log")
 	}
 
+	fmt.Printf("Wrote message at offset %d: index=%d, key=%s to segment %s\n", c.lastOffset, index, key, c.log.Name())
+
 	if c.isInSyncDiskMode {
 		if err := c.log.Sync(); err != nil {
-			return errors.Wrap(err, "failed to sync msg log file")
+			return errors.Wrap(err, "failed to sync log")
 		}
 	}
 
+	// Обновляем смещение и индекс
 	c.lastOffset += int64(c.buf.Len())
 	c.buf.Reset()
-
-	// update index
 	c.index[index] = msg.Msg{Key: key, Value: value, Idx: index}
-
-	c.rotateSegments(msg.Msg{Key: key, Value: value, Idx: index})
 
 	return nil
 }
 
-// oldestSegmentName returns name of the oldest segment in the directory.
-func (c *Wal) oldestSegmentName(numberOfSegments int) string {
-	latestSegmentIndex := 0
-	if numberOfSegments >= c.maxSegments {
-		latestSegmentIndex = numberOfSegments - c.maxSegments
+// removeOldestSegment deletes the oldest segment.
+func (c *Wal) removeOldestSegment() error {
+	oldestSegment := c.oldestSegmentName()
+	if err := os.Remove(oldestSegment); err != nil {
+		return errors.Wrap(err, "failed to remove oldest segment")
 	}
-	return path.Join(c.pathToLogsDir, c.prefix+strconv.Itoa(int(latestSegmentIndex)))
+
+	// Переприсваиваем временный индекс в основной
+	c.index = c.tmpIndex
+	c.tmpIndex = make(map[uint64]msg.Msg)
+
+	return nil
+}
+
+// openNewSegment creates new segment.
+func (c *Wal) openNewSegment() error {
+	newSegmentName := path.Join(c.pathToLogsDir, c.prefix+strconv.Itoa(c.segmentsNumber))
+	logFile, err := os.OpenFile(newSegmentName, os.O_RDWR|os.O_CREATE, 0755)
+	if err != nil {
+		return errors.Wrap(err, "failed to create new log file")
+	}
+
+	c.segmentsNumber++
+
+	c.log = logFile
+	c.lastOffset = 0
+
+	c.buf.Reset()
+	c.enc = gob.NewEncoder(c.buf)
+
+	return nil
+}
+
+// oldestSegmentName returns name of the oldest segment.
+func (c *Wal) oldestSegmentName() string {
+	oldestSegmentNumber := c.segmentsNumber - c.maxSegments
+	if oldestSegmentNumber < 0 {
+		oldestSegmentNumber = 0
+	}
+	return path.Join(c.pathToLogsDir, c.prefix+strconv.Itoa(oldestSegmentNumber))
 }
 
 // Get queries value at specific index in the log log.
