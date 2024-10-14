@@ -29,7 +29,15 @@ To create a new WAL instance, specify the directory to store logs and a prefix f
 ```go
 import "github.com/vadiminshakov/gowal"
 
-wal, err := gowal.NewWAL("/path/to/logs", "prefix")
+cfg := gowal.Config{
+    Dir:    "./segments",
+    Prefix: "log_",
+    SegmentThreshold: segmentThreshold,
+    MaxSegments:      segmentsNumber,
+    IsInSyncDiskMode: false,
+})
+
+wal, err := gowal.NewWAL(cfg)
 if err != nil {
     log.Fatal(err)
 }
