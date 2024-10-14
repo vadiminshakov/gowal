@@ -32,8 +32,8 @@ import "github.com/vadiminshakov/gowal"
 cfg := gowal.Config{
     Dir:    "./segments",
     Prefix: "log_",
-    SegmentThreshold: segmentThreshold,
-    MaxSegments:      segmentsNumber,
+    SegmentThreshold: 1000,
+    MaxSegments:      100,
     IsInSyncDiskMode: false,
 })
 
