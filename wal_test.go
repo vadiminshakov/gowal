@@ -1,8 +1,12 @@
 package gowal
 
 import (
+	"cmp"
 	"github.com/stretchr/testify/require"
+	"github.com/vadiminshakov/gowal/msg"
+	"maps"
 	"os"
+	"slices"
 	"strconv"
 	"testing"
 )
@@ -85,7 +89,7 @@ func TestLoadIndex(t *testing.T) {
 }
 
 func TestSegmentRotation(t *testing.T) {
-	segmentThreshold := 5
+	segmentThreshold := 10
 	segmentsNumber := 2
 
 	log, err := NewWAL(Config{
@@ -97,22 +101,25 @@ func TestSegmentRotation(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// here we exceed the segment size threshold (segmentThreshold), create new segment, keep old segment on disk until tmpIndexBufferThreshold
-	// is reached, then del old segment and write 10 more log
-	for i := 0; i < segmentThreshold*segmentsNumber+8; i++ {
+	// here we exceed the segment size threshold (segmentThreshold) and write 10 more log entries to the new segment
+	for i := 0; i < segmentThreshold*segmentsNumber+10; i++ {
 		require.NoError(t, log.Set(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
 	}
 
-	// now we have only one segment on disk with tmpIndexBufferThreshold+10 log,
-	// load it in the memory
+	// load index of last segment
 	index, err := loadIndexes(log.log)
 	require.NoError(t, err)
 
-	// check all saved log in the index
-	// we have all log with height greater than segmentThreshold and less than segmentThreshold+(tmpIndexBufferThreshold+10)
-	for i := segmentThreshold * segmentsNumber; i < segmentThreshold*segmentsNumber+8; i++ {
-		require.Equal(t, "key"+strconv.Itoa(i), index[uint64(i)].Key)
-		require.Equal(t, "value"+strconv.Itoa(i), string(index[uint64(i)].Value))
+	// check
+	indexValues := slices.Collect(maps.Values(index))
+
+	slices.SortFunc(indexValues, func(a, b msg.Msg) int {
+		return cmp.Compare(a.Idx, b.Idx)
+	})
+
+	for i, v := range indexValues {
+		keyWithOffset := i + segmentThreshold*segmentsNumber
+		require.Equal(t, "value"+strconv.Itoa(keyWithOffset), string(v.Value))
 	}
 
 	require.NoError(t, os.RemoveAll("./testlogdata"))
