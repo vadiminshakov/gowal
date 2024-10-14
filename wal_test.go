@@ -59,7 +59,7 @@ func TestIterator(t *testing.T) {
 	require.NoError(t, os.RemoveAll("./testlogdata"))
 }
 
-func TestLoadIndexMsg(t *testing.T) {
+func TestLoadIndex(t *testing.T) {
 	log, err := NewWAL(Config{
 		Dir:              "./testlogdata",
 		Prefix:           "log_",
@@ -84,7 +84,7 @@ func TestLoadIndexMsg(t *testing.T) {
 	require.NoError(t, os.RemoveAll("./testlogdata"))
 }
 
-func TestSegmentRotationForMsgs(t *testing.T) {
+func TestSegmentRotation(t *testing.T) {
 	segmentThreshold := 5
 	segmentsNumber := 2
 
