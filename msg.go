@@ -1,11 +1,11 @@
 package gowal
 
-type Msg struct {
+type msg struct {
 	Key   string
 	Value []byte
 	Idx   uint64
 }
 
-func (m Msg) Index() uint64 {
+func (m msg) Index() uint64 {
 	return m.Idx
 }

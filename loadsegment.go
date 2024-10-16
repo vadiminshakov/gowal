@@ -15,12 +15,12 @@ import (
 
 // segmentInfoAndIndex loads segment info (file descriptor, name, size, etc) and index from segment files for log log.
 // Works like loadSegment, but for multiple segments.
-func segmentInfoAndIndex(segNumbers []int, path string) (*os.File, os.FileInfo, map[uint64]Msg, error) {
-	index := make(map[uint64]Msg)
+func segmentInfoAndIndex(segNumbers []int, path string) (*os.File, os.FileInfo, map[uint64]msg, error) {
+	index := make(map[uint64]msg)
 	var (
 		logFileFD      *os.File
 		logFileInfo    os.FileInfo
-		idxFromSegment map[uint64]Msg
+		idxFromSegment map[uint64]msg
 		err            error
 	)
 	for _, segindex := range segNumbers {
@@ -36,7 +36,7 @@ func segmentInfoAndIndex(segNumbers []int, path string) (*os.File, os.FileInfo, 
 }
 
 // loadSegment loads segment info (file descriptor, name, size, etc) and index from segment file.
-func loadSegment(path string) (fd *os.File, fileinfo os.FileInfo, index map[uint64]Msg, err error) {
+func loadSegment(path string) (fd *os.File, fileinfo os.FileInfo, index map[uint64]msg, err error) {
 	fd, err = os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0755)
 	if err != nil {
 		return nil, nil, nil, errors.Wrap(err, "failed to open log segment file")
@@ -95,20 +95,20 @@ func findSegmentNumber(dir string, prefix string) (segmentsNumbers []int, err er
 }
 
 // loadIndexes loads index from log file.
-func loadIndexes(file *os.File) (map[uint64]Msg, error) {
+func loadIndexes(file *os.File) (map[uint64]msg, error) {
 	buf, err := io.ReadAll(file)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read log file")
 	}
 
 	if len(buf) == 0 {
-		return make(map[uint64]Msg), nil
+		return make(map[uint64]msg), nil
 	}
 
-	var msgs []Msg
+	var msgs []msg
 	dec := gob.NewDecoder(bytes.NewReader(buf))
 	for {
-		var msgIndexed Msg
+		var msgIndexed msg
 		if err = dec.Decode(&msgIndexed); err != nil {
 			if err == io.EOF {
 				break
@@ -119,7 +119,7 @@ func loadIndexes(file *os.File) (map[uint64]Msg, error) {
 		msgs = append(msgs, msgIndexed)
 	}
 
-	index := make(map[uint64]Msg, len(msgs))
+	index := make(map[uint64]msg, len(msgs))
 	for _, idxMsg := range msgs {
 		index[idxMsg.Idx] = idxMsg
 	}

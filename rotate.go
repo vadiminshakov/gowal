@@ -31,7 +31,7 @@ func (c *Wal) rotateIfNeeded(index uint64, key string, value []byte) error {
 		}
 	}
 
-	c.tmpIndex[index] = Msg{Key: key, Value: value, Idx: index}
+	c.tmpIndex[index] = msg{Key: key, Value: value, Idx: index}
 
 	return nil
 }
