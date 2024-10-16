@@ -2,7 +2,6 @@ package gowal
 
 import (
 	"github.com/pkg/errors"
-	"github.com/vadiminshakov/gowal/msg"
 )
 
 // rotateIfNeeded rotates the log if needed.
@@ -32,7 +31,7 @@ func (c *Wal) rotateIfNeeded(index uint64, key string, value []byte) error {
 		}
 	}
 
-	c.tmpIndex[index] = msg.Msg{Key: key, Value: value, Idx: index}
+	c.tmpIndex[index] = Msg{Key: key, Value: value, Idx: index}
 
 	return nil
 }

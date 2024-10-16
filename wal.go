@@ -5,7 +5,6 @@ import (
 	"encoding/gob"
 	"fmt"
 	"github.com/pkg/errors"
-	"github.com/vadiminshakov/gowal/msg"
 	"os"
 	"path"
 	"sort"
@@ -25,8 +24,8 @@ type Wal struct {
 	log *os.File
 
 	// index that matches height of msg record with offset in file
-	index    map[uint64]msg.Msg
-	tmpIndex map[uint64]msg.Msg
+	index    map[uint64]Msg
+	tmpIndex map[uint64]Msg
 
 	// gob encoder for proposed messages
 	enc *gob.Encoder
@@ -87,7 +86,7 @@ func NewWAL(config Config) (*Wal, error) {
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
 
-	return &Wal{log: fd, index: index, tmpIndex: make(map[uint64]msg.Msg),
+	return &Wal{log: fd, index: index, tmpIndex: make(map[uint64]Msg),
 		buf: &buf, enc: enc, lastOffset: stat.Size(), pathToLogsDir: config.Dir,
 		segmentsNumber: numberOfSegments, prefix: config.Prefix, segmentsThreshold: config.SegmentThreshold,
 		maxSegments: config.MaxSegments, isInSyncDiskMode: config.IsInSyncDiskMode}, nil
@@ -103,7 +102,7 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 		return err
 	}
 
-	if err := c.enc.Encode(msg.Msg{Key: key, Value: value, Idx: index}); err != nil {
+	if err := c.enc.Encode(Msg{Key: key, Value: value, Idx: index}); err != nil {
 		return errors.Wrap(err, "failed to encode msg")
 	}
 
@@ -122,7 +121,7 @@ func (c *Wal) Set(index uint64, key string, value []byte) error {
 	// Обновляем смещение и индекс
 	c.lastOffset += int64(c.buf.Len())
 	c.buf.Reset()
-	c.index[index] = msg.Msg{Key: key, Value: value, Idx: index}
+	c.index[index] = Msg{Key: key, Value: value, Idx: index}
 
 	return nil
 }
@@ -136,7 +135,7 @@ func (c *Wal) removeOldestSegment() error {
 
 	// Переприсваиваем временный индекс в основной
 	c.index = c.tmpIndex
-	c.tmpIndex = make(map[uint64]msg.Msg)
+	c.tmpIndex = make(map[uint64]Msg)
 
 	return nil
 }
@@ -183,7 +182,7 @@ func (c *Wal) Get(index uint64) (string, []byte, bool) {
 // It returns function that returns next message and bool flag,
 // which is false if there are no more messages.
 // Messages are returned from the oldest to the newest.
-func (c *Wal) Iterator() func() (msg.Msg, bool) {
+func (c *Wal) Iterator() func() (Msg, bool) {
 	msgIndexes := make([]uint64, 0, len(c.index))
 
 	for k := range c.index {
@@ -196,9 +195,9 @@ func (c *Wal) Iterator() func() (msg.Msg, bool) {
 
 	i := 0
 
-	return func() (msg.Msg, bool) {
+	return func() (Msg, bool) {
 		if i >= len(msgIndexes) {
-			return msg.Msg{}, false
+			return Msg{}, false
 		}
 
 		msg := c.index[msgIndexes[i]]

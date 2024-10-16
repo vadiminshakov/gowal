@@ -1,4 +1,4 @@
-package msg
+package gowal
 
 type Msg struct {
 	Key   string
