@@ -128,30 +128,35 @@ func TestSegmentRotation(t *testing.T) {
 func TestServiceDownUpAndRepairIndex(t *testing.T) {
 	segmentThreshold := 10
 
-	log, err := NewWAL(Config{
-		Dir:              "./testlogdata",
-		Prefix:           "log_",
-		SegmentThreshold: 10,
-		MaxSegments:      5,
-		IsInSyncDiskMode: false,
-	})
+	initWal := func() (*Wal, error) {
+		t.Helper()
+
+		return NewWAL(Config{
+			Dir:              "./testlogdata",
+			Prefix:           "log_",
+			SegmentThreshold: 10,
+			MaxSegments:      5,
+			IsInSyncDiskMode: false,
+		})
+	}
+
+	// init
+	log, err := initWal()
 	require.NoError(t, err)
 
+	// write 10 log entries to the wal
 	for i := 0; i < segmentThreshold+(segmentThreshold/2); i++ {
 		require.NoError(t, log.Set(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
 	}
 
+	// close the wal
 	require.NoError(t, log.Close())
 
-	log, err = NewWAL(Config{
-		Dir:              "./testlogdata",
-		Prefix:           "log_",
-		SegmentThreshold: 10,
-		MaxSegments:      5,
-		IsInSyncDiskMode: false,
-	})
+	// open the wal again
+	log, err = initWal()
 	require.NoError(t, err)
 
+	// check
 	for i := 0; i < segmentThreshold+(segmentThreshold/2); i++ {
 		require.Equal(t, "key"+strconv.Itoa(i), log.index[uint64(i)].Key)
 		require.Equal(t, "value"+strconv.Itoa(i), string(log.index[uint64(i)].Value))
