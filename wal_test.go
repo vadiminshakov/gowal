@@ -3,7 +3,6 @@ package gowal
 import (
 	"cmp"
 	"github.com/stretchr/testify/require"
-	"github.com/vadiminshakov/gowal/msg"
 	"maps"
 	"os"
 	"slices"
@@ -113,7 +112,7 @@ func TestSegmentRotation(t *testing.T) {
 	// check
 	indexValues := slices.Collect(maps.Values(index))
 
-	slices.SortFunc(indexValues, func(a, b msg.Msg) int {
+	slices.SortFunc(indexValues, func(a, b msg) int {
 		return cmp.Compare(a.Idx, b.Idx)
 	})
 
