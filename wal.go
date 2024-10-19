@@ -92,8 +92,8 @@ func NewWAL(config Config) (*Wal, error) {
 		maxSegments: config.MaxSegments, isInSyncDiskMode: config.IsInSyncDiskMode}, nil
 }
 
-// Set writes key-value pair to the log.
-func (c *Wal) Set(index uint64, key string, value []byte) error {
+// Write writes key-value pair to the log.
+func (c *Wal) Write(index uint64, key string, value []byte) error {
 	if _, exists := c.index[index]; exists {
 		return ErrExists // Предотвращаем дублирование индексов
 	}

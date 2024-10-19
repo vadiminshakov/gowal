@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestSetGet(t *testing.T) {
+func TestWriteAndGet(t *testing.T) {
 	log, err := NewWAL(Config{
 		Dir:              "./testlogdata",
 		Prefix:           "log_",
@@ -21,7 +21,7 @@ func TestSetGet(t *testing.T) {
 	require.NoError(t, err)
 
 	for i := 0; i < 10; i++ {
-		require.NoError(t, log.Set(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
 	}
 
 	for i := 0; i < 10; i++ {
@@ -45,7 +45,7 @@ func TestIterator(t *testing.T) {
 	require.NoError(t, err)
 
 	for i := 0; i < 10; i++ {
-		require.NoError(t, log.Set(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
 	}
 
 	iter := log.Iterator()
@@ -73,7 +73,7 @@ func TestLoadIndex(t *testing.T) {
 	require.NoError(t, err)
 
 	for i := 0; i < 10; i++ {
-		require.NoError(t, log.Set(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
 	}
 
 	index, err := loadIndexes(log.log)
@@ -102,7 +102,7 @@ func TestSegmentRotation(t *testing.T) {
 
 	// here we exceed the segment size threshold (segmentThreshold) and write 10 more log entries to the new segment
 	for i := 0; i < segmentThreshold*segmentsNumber+10; i++ {
-		require.NoError(t, log.Set(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
 	}
 
 	// load index of last segment
@@ -146,7 +146,7 @@ func TestServiceDownUpAndRepairIndex(t *testing.T) {
 
 	// write 10 log entries to the wal
 	for i := 0; i < segmentThreshold+(segmentThreshold/2); i++ {
-		require.NoError(t, log.Set(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
 	}
 
 	// close the wal
