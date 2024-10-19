@@ -30,8 +30,8 @@ To create a new WAL instance, specify the directory to store logs and a prefix f
 import "github.com/vadiminshakov/gowal"
 
 cfg := gowal.Config{
-    Dir:    "./segments",
-    Prefix: "log_",
+    Dir:    "./log",
+    Prefix: "segment_",
     SegmentThreshold: 1000,
     MaxSegments:      100,
     IsInSyncDiskMode: false,
@@ -47,7 +47,7 @@ defer wal.Close()
 ### Adding a log entry
 You can append a new log entry by providing an index, a key, and a value:
 ```go
-err := wal.Set(1, "myKey", []byte("myValue"))
+err := wal.Write(1, "myKey", []byte("myValue"))
 if err != nil {
     log.Fatal(err)
 }
