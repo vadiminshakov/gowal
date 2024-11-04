@@ -164,3 +164,22 @@ func TestServiceDownUpAndRepairIndex(t *testing.T) {
 
 	require.NoError(t, os.RemoveAll("./testlogdata"))
 }
+
+func TestChecksum(t *testing.T) {
+	log, err := NewWAL(Config{
+		Dir:              "./testlogdata",
+		Prefix:           "log_",
+		SegmentThreshold: 10,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
+	require.NoError(t, err)
+
+	for i := 0; i < 2; i++ {
+		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+	}
+
+	require.NoError(t, compareChecksums(log.log, log.checksum))
+
+	require.NoError(t, os.RemoveAll("./testlogdata"))
+}
