@@ -50,7 +50,7 @@ func compareChecksums(fd *os.File, chk *os.File) error {
 	}
 
 	if !bytes.Equal(sum, buf) {
-		return fmt.Errorf("checksums do not match, expected %x, got %x", sum, buf)
+		return fmt.Errorf("checksums do not match, expected %x, got %x", sum[len(sum)-5:], buf[len(buf)-5:])
 	}
 
 	_, err = fd.Seek(currentOffsetFd, 0)
