@@ -15,44 +15,54 @@ import (
 
 // segmentInfoAndIndex loads segment info (file descriptor, name, size, etc) and index from segment files for log log.
 // Works like loadSegment, but for multiple segments.
-func segmentInfoAndIndex(segNumbers []int, path string) (*os.File, os.FileInfo, map[uint64]msg, error) {
+func segmentInfoAndIndex(segNumbers []int, path string) (*os.File, *os.File, os.FileInfo, map[uint64]msg, error) {
 	index := make(map[uint64]msg)
 	var (
 		logFileFD      *os.File
+		checksumFd     *os.File
 		logFileInfo    os.FileInfo
 		idxFromSegment map[uint64]msg
 		err            error
 	)
 	for _, segindex := range segNumbers {
-		logFileFD, logFileInfo, idxFromSegment, err = loadSegment(path + strconv.Itoa(segindex))
+		logFileFD, checksumFd, logFileInfo, idxFromSegment, err = loadSegment(path + strconv.Itoa(segindex))
 		if err != nil {
-			return nil, nil, nil, errors.Wrap(err, "failed to load indexes from msg log file")
+			return nil, nil, nil, nil, errors.Wrap(err, "failed to load indexes from msg log file")
 		}
 
 		maps.Copy(index, idxFromSegment)
 	}
 
-	return logFileFD, logFileInfo, index, nil
+	return logFileFD, checksumFd, logFileInfo, index, nil
 }
 
 // loadSegment loads segment info (file descriptor, name, size, etc) and index from segment file.
-func loadSegment(path string) (fd *os.File, fileinfo os.FileInfo, index map[uint64]msg, err error) {
+func loadSegment(path string) (fd *os.File, checksumFd *os.File, fileinfo os.FileInfo, index map[uint64]msg, err error) {
 	fd, err = os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0755)
 	if err != nil {
-		return nil, nil, nil, errors.Wrap(err, "failed to open log segment file")
+		return nil, nil, nil, nil, errors.Wrap(err, "failed to open log segment file")
+	}
+
+	chk, err := os.OpenFile(path+checkSumPostfix, os.O_RDWR|os.O_CREATE, 0755)
+	if err != nil {
+		return nil, nil, nil, nil, errors.Wrap(err, "failed to cheksum file")
+	}
+
+	if err = compareChecksums(fd, chk); err != nil {
+		return nil, nil, nil, nil, errors.Wrap(err, "failed to compare checksums")
 	}
 
 	index, err = loadIndexes(fd)
 	if err != nil {
-		return nil, nil, nil, errors.Wrap(err, "failed to build index from log segment")
+		return nil, nil, nil, nil, errors.Wrap(err, "failed to build index from log segment")
 	}
 
 	fileinfo, err = fd.Stat()
 	if err != nil {
-		return nil, nil, nil, errors.Wrap(err, "failed to read log segment file stat")
+		return nil, nil, nil, nil, errors.Wrap(err, "failed to read log segment file stat")
 	}
 
-	return fd, fileinfo, index, nil
+	return fd, chk, fileinfo, index, nil
 }
 
 // findSegmentNumbers finds all segment numbers in the directory.
@@ -73,6 +83,11 @@ func findSegmentNumber(dir string, prefix string) (segmentsNumbers []int, err er
 		if d.IsDir() {
 			continue
 		}
+
+		if strings.HasSuffix(d.Name(), checkSumPostfix) {
+			continue
+		}
+
 		if strings.HasPrefix(d.Name(), prefix) {
 			i, err := extractSegmentNum(d.Name())
 			if err != nil {
