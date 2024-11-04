@@ -118,7 +118,6 @@ func (c *Wal) Write(index uint64, key string, value []byte) error {
 		}
 	}
 
-	// Обновляем смещение и индекс
 	c.lastOffset += int64(c.buf.Len())
 	c.buf.Reset()
 	c.index[index] = msg{Key: key, Value: value, Idx: index}
@@ -133,7 +132,6 @@ func (c *Wal) removeOldestSegment() error {
 		return errors.Wrap(err, "failed to remove oldest segment")
 	}
 
-	// Переприсваиваем временный индекс в основной
 	c.index = c.tmpIndex
 	c.tmpIndex = make(map[uint64]msg)
 
