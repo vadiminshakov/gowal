@@ -23,6 +23,9 @@ type Wal struct {
 	// append-only log with proposed messages that node consumed
 	log *os.File
 
+	// file with checksum for current segment
+	checksum *os.File
+
 	// index that matches height of msg record with offset in file
 	index    map[uint64]msg
 	tmpIndex map[uint64]msg
@@ -74,7 +77,7 @@ func NewWAL(config Config) (*Wal, error) {
 	}
 
 	// load segments into mem
-	fd, stat, index, err := segmentInfoAndIndex(segmentsNumbers, path.Join(config.Dir, config.Prefix))
+	fd, chk, stat, index, err := segmentInfoAndIndex(segmentsNumbers, path.Join(config.Dir, config.Prefix))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load log segments")
 	}
@@ -86,7 +89,7 @@ func NewWAL(config Config) (*Wal, error) {
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
 
-	return &Wal{log: fd, index: index, tmpIndex: make(map[uint64]msg),
+	return &Wal{log: fd, index: index, checksum: chk, tmpIndex: make(map[uint64]msg),
 		buf: &buf, enc: enc, lastOffset: stat.Size(), pathToLogsDir: config.Dir,
 		segmentsNumber: numberOfSegments, prefix: config.Prefix, segmentsThreshold: config.SegmentThreshold,
 		maxSegments: config.MaxSegments, isInSyncDiskMode: config.IsInSyncDiskMode}, nil
@@ -110,11 +113,18 @@ func (c *Wal) Write(index uint64, key string, value []byte) error {
 		return errors.Wrap(err, "failed to write msg to log")
 	}
 
+	if err := writeChecksum(c.log, c.checksum); err != nil {
+		return errors.Wrap(err, "failed to write checksum")
+	}
+
 	fmt.Printf("Wrote message at offset %d: index=%d, key=%s to segment %s\n", c.lastOffset, index, key, c.log.Name())
 
 	if c.isInSyncDiskMode {
 		if err := c.log.Sync(); err != nil {
 			return errors.Wrap(err, "failed to sync log")
+		}
+		if err := c.checksum.Sync(); err != nil {
+			return errors.Wrap(err, "failed to checksum")
 		}
 	}
 
@@ -210,10 +220,15 @@ func (c *Wal) CurrentIndex() uint64 {
 	return uint64(len(c.index))
 }
 
-// Close closes log files.
+// Close closes log and checksum files.
 func (c *Wal) Close() error {
 	if err := c.log.Close(); err != nil {
 		return errors.Wrap(err, "failed to close log log file")
 	}
+
+	if err := c.checksum.Close(); err != nil {
+		return errors.Wrap(err, "failed to close checksum file")
+	}
+
 	return nil
 }
