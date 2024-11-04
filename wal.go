@@ -156,9 +156,15 @@ func (c *Wal) openNewSegment() error {
 		return errors.Wrap(err, "failed to create new log file")
 	}
 
+	checksumFile, err := os.OpenFile(newSegmentName+checkSumPostfix, os.O_RDWR|os.O_CREATE, 0755)
+	if err != nil {
+		return errors.Wrap(err, "failed to create new log file")
+	}
+
 	c.segmentsNumber++
 
 	c.log = logFile
+	c.checksum = checksumFile
 	c.lastOffset = 0
 
 	c.buf.Reset()
