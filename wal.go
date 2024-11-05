@@ -142,6 +142,10 @@ func (c *Wal) removeOldestSegment() error {
 		return errors.Wrap(err, "failed to remove oldest segment")
 	}
 
+	if err := os.Remove(oldestSegment + checkSumPostfix); err != nil {
+		return errors.Wrap(err, "failed to remove oldest segment checksum file")
+	}
+
 	c.index = c.tmpIndex
 	c.tmpIndex = make(map[uint64]msg)
 
