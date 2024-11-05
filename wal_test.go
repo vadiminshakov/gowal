@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -144,7 +145,6 @@ func TestServiceDownUpAndRepairIndex(t *testing.T) {
 	log, err := initWal()
 	require.NoError(t, err)
 
-	// write 10 log entries to the wal
 	for i := 0; i < segmentThreshold+(segmentThreshold/2); i++ {
 		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
 	}
@@ -180,6 +180,66 @@ func TestChecksum(t *testing.T) {
 	}
 
 	require.NoError(t, compareChecksums(log.log, log.checksum))
+
+	require.NoError(t, os.RemoveAll("./testlogdata"))
+}
+
+func TestChecksum_Corrupted(t *testing.T) {
+	log, err := NewWAL(Config{
+		Dir:              "./testlogdata",
+		Prefix:           "log_",
+		SegmentThreshold: 10,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
+	require.NoError(t, err)
+
+	for i := 0; i < 2; i++ {
+		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+	}
+
+	// corrupt the data by writing some garbage to the segment file
+	log.log.Write([]byte("corrupted data"))
+
+	require.Error(t, compareChecksums(log.log, log.checksum))
+
+	require.NoError(t, os.RemoveAll("./testlogdata"))
+}
+
+func TestChecksum_Check_Checksum_Files(t *testing.T) {
+	log, err := NewWAL(Config{
+		Dir:              "./testlogdata",
+		Prefix:           "log_",
+		SegmentThreshold: 1,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
+	require.NoError(t, err)
+
+	for i := 0; i < 5; i++ {
+		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+	}
+
+	require.NoError(t, compareChecksums(log.log, log.checksum))
+
+	// find all checksum files
+	checksumFiles, err := os.ReadDir("./testlogdata")
+	require.NoError(t, err)
+
+	countOfChecksums := 0
+	for _, f := range checksumFiles {
+		if f.IsDir() {
+			continue
+		}
+
+		if strings.Contains(f.Name(), "checksum") {
+			continue
+		}
+
+		countOfChecksums++
+	}
+
+	require.Equal(t, countOfChecksums, 5)
 
 	require.NoError(t, os.RemoveAll("./testlogdata"))
 }
