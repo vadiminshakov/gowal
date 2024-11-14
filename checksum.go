@@ -14,12 +14,12 @@ const checkSumPostfix = ".checksum"
 func compareChecksums(fd *os.File, chk *os.File) error {
 	fi, err := fd.Stat()
 	if err != nil {
-		return errors.Wrap(err, "failed to get file info for log file")
+		return errors.Wrapf(err, "failed to get file info for log file %s", fi.Name())
 	}
 
 	chkFi, err := chk.Stat()
 	if err != nil {
-		return errors.Wrap(err, "failed to get file info for checksum file")
+		return errors.Wrapf(err, "failed to get file info for checksum file %s", chkFi.Name())
 	}
 
 	if fi.Size() == 0 && chkFi.Size() == 0 {
@@ -28,39 +28,39 @@ func compareChecksums(fd *os.File, chk *os.File) error {
 
 	currentOffsetFd, err := fd.Seek(0, 0)
 	if err != nil {
-		return errors.Wrap(err, "failed to seek to the beginning of the log file")
+		return errors.Wrapf(err, "failed to seek to the beginning of the log file %s", fd.Name())
 	}
 
 	currentOffsetChk, err := chk.Seek(0, 0)
 	if err != nil {
-		return errors.Wrap(err, "failed to seek to the beginning of the checksum file")
+		return errors.Wrapf(err, "failed to seek to the beginning of the checksum file %s", chk.Name())
 	}
 
 	h := sha256.New()
 	_, err = io.Copy(h, fd)
 	if err != nil {
-		return errors.Wrap(err, "failed to copy contents of segment file to verify checksum")
+		return errors.Wrapf(err, "failed to copy contents of segment file %s to verify checksum", fd.Name())
 	}
 
 	sum := h.Sum(nil)
 
 	buf, err := io.ReadAll(chk)
 	if err != nil {
-		return errors.Wrap(err, "failed to read checksum file")
+		return errors.Wrapf(err, "failed to read checksum file %s", chk.Name())
 	}
 
 	if !bytes.Equal(sum, buf) {
-		return fmt.Errorf("checksums do not match, expected %x, got %x", sum[len(sum)-5:], buf[len(buf)-5:])
+		return fmt.Errorf("file %s corrupted, checksums do not match, expected %x, got %x", fd.Name(), sum[len(sum)-5:], buf[len(buf)-5:])
 	}
 
 	_, err = fd.Seek(currentOffsetFd, 0)
 	if err != nil {
-		return errors.Wrap(err, "failed to restore original position in log file")
+		return errors.Wrapf(err, "failed to restore original position in log file %s", fd.Name())
 	}
 
 	_, err = fd.Seek(currentOffsetChk, 0)
 	if err != nil {
-		return errors.Wrap(err, "failed to restore original position in checksum file")
+		return errors.Wrapf(err, "failed to restore original position in checksum file %s", fd.Name())
 	}
 
 	return nil
