@@ -13,6 +13,7 @@ GoWAL is a simple, efficient **Write-Ahead Log (WAL)** library written in Go. It
 - **Efficient lookups**: In-memory index allows for quick lookups of log entries by their index.
 - **Persistence**: Logs and their indexes are stored on disk and reloaded into memory upon initialization.
 - **Configurable sync mode**: Option to sync logs to disk after every write to ensure data durability, though at the cost of speed.
+- **Checksums**: Each log segment has an associated checksum file to ensure data integrity.
 
 ## Installation
 
