@@ -218,9 +218,9 @@ func TestChecksum_Check_Checksum_Files(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
-	}
 
-	require.NoError(t, compareChecksums(log.log, log.checksum))
+		require.NoError(t, compareChecksums(log.log, log.checksum))
+	}
 
 	// find all checksum files
 	checksumFiles, err := os.ReadDir("./testlogdata")
