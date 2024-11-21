@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-// segmentInfoAndIndex loads segment info (file descriptor, name, size, etc) and index from segment files for log log.
+// segmentInfoAndIndex loads segment info (file descriptor, name, size, etc) and index from segment files.
 // Works like loadSegment, but for multiple segments.
 func segmentInfoAndIndex(segNumbers []int, path string) (*os.File, *os.File, os.FileInfo, map[uint64]msg, error) {
 	index := make(map[uint64]msg)
