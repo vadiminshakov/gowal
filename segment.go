@@ -207,7 +207,7 @@ func loadIndexes(file *os.File) (map[uint64]msg, error) {
 func extractSegmentNum(segmentName string) (int, error) {
 	_, suffix, ok := strings.Cut(segmentName, "_")
 	if !ok {
-		return 0, fmt.Errorf("failed to cut suffix from log log file name %s", segmentName)
+		return 0, fmt.Errorf("failed to cut suffix from log file name %s", segmentName)
 	}
 	i, err := strconv.Atoi(suffix)
 	if err != nil {
