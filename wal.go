@@ -58,11 +58,21 @@ type Wal struct {
 	isInSyncDiskMode bool
 }
 
+// Config represents the configuration for the WAL (Write-Ahead Log).
 type Config struct {
-	Dir              string
-	Prefix           string
+	// Dir is the directory where the log files will be stored.
+	Dir string
+
+	// Prefix is the prefix for the segment files.
+	Prefix string
+
+	// SegmentThreshold is the number of records after which a new segment is created.
 	SegmentThreshold int
-	MaxSegments      int
+
+	// MaxSegments is the maximum number of segments allowed before the oldest segment is deleted.
+	MaxSegments int
+
+	// IsInSyncDiskMode indicates whether the log should be synced to disk after each write.
 	IsInSyncDiskMode bool
 }
 
