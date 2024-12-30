@@ -65,16 +65,6 @@ func (c *Wal) oldestSegmentName() string {
 	return path.Join(c.pathToLogsDir, c.prefix+strconv.Itoa(oldestSegmentNumber))
 }
 
-// Get queries value at specific index in the log log.
-func (c *Wal) Get(index uint64) (string, []byte, bool) {
-	msg, ok := c.index[index]
-	if !ok {
-		return "", nil, false
-	}
-
-	return msg.Key, msg.Value, true
-}
-
 // segmentInfoAndIndex loads segment info (file descriptor, name, size, etc) and index from segment files.
 // Works like loadSegment, but for multiple segments.
 func segmentInfoAndIndex(segNumbers []int, path string) (*os.File, *os.File, os.FileInfo, map[uint64]msg, error) {

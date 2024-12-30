@@ -105,6 +105,16 @@ func NewWAL(config Config) (*Wal, error) {
 		maxSegments: config.MaxSegments, isInSyncDiskMode: config.IsInSyncDiskMode}, nil
 }
 
+// Get queries value at specific index in the log log.
+func (c *Wal) Get(index uint64) (string, []byte, bool) {
+	msg, ok := c.index[index]
+	if !ok {
+		return "", nil, false
+	}
+
+	return msg.Key, msg.Value, true
+}
+
 // Write writes key-value pair to the log.
 func (c *Wal) Write(index uint64, key string, value []byte) error {
 	if _, exists := c.index[index]; exists {
