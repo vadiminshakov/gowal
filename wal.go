@@ -115,6 +115,11 @@ func (c *Wal) Get(index uint64) (string, []byte, bool) {
 	return msg.Key, msg.Value, true
 }
 
+// CurrentIndex returns current index of the log.
+func (c *Wal) CurrentIndex() uint64 {
+	return uint64(len(c.index))
+}
+
 // Write writes key-value pair to the log.
 func (c *Wal) Write(index uint64, key string, value []byte) error {
 	if _, exists := c.index[index]; exists {
@@ -192,11 +197,6 @@ func (c *Wal) Iterator() iter.Seq[msg] {
 //	...
 func (c *Wal) PullIterator() (next func() (msg, bool), stop func()) {
 	return iter.Pull(c.Iterator())
-}
-
-// CurrentIndex returns current index of the log.
-func (c *Wal) CurrentIndex() uint64 {
-	return uint64(len(c.index))
 }
 
 // Close closes log and checksum files.
