@@ -49,16 +49,31 @@ func TestIterator(t *testing.T) {
 		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
 	}
 
-	iter := log.Iterator()
-	for i := 0; i < 10; i++ {
-		msg, ok := iter()
-		require.True(t, ok)
-		require.Equal(t, "key"+strconv.Itoa(i), msg.Key)
-		require.Equal(t, "value"+strconv.Itoa(i), string(msg.Value))
-	}
+	t.Run("Iterator", func(t *testing.T) {
+		i := 0
+		for msg := range log.Iterator() {
+			require.Equal(t, "key"+strconv.Itoa(i), msg.Key)
+			require.Equal(t, "value"+strconv.Itoa(i), string(msg.Value))
+			i++
+		}
+	})
 
-	_, ok := iter()
-	require.False(t, ok)
+	t.Run("PullIterator", func(t *testing.T) {
+		iter, stop := log.PullIterator()
+		defer stop()
+
+		i := 0
+		for {
+			msg, ok := iter()
+			if !ok {
+				break
+			}
+
+			require.Equal(t, "key"+strconv.Itoa(i), msg.Key)
+			require.Equal(t, "value"+strconv.Itoa(i), string(msg.Value))
+			i++
+		}
+	})
 
 	require.NoError(t, os.RemoveAll("./testlogdata"))
 }
