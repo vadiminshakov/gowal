@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"fmt"
 	"github.com/pkg/errors"
+	"iter"
 	"os"
 	"path"
 	"sort"
@@ -144,33 +145,43 @@ func (c *Wal) Write(index uint64, key string, value []byte) error {
 	return nil
 }
 
-// Iterator returns iterator for the WAL messages.
-// It returns function that returns next message and bool flag,
-// which is false if there are no more messages.
+// Iterator returns push-based iterator for the WAL messages.
 // Messages are returned from the oldest to the newest.
-func (c *Wal) Iterator() func() (msg, bool) {
-	msgIndexes := make([]uint64, 0, len(c.index))
+//
+// Should be used like this:
+//
+//	for msg := range wal.Iterator() {
+//		...
+func (c *Wal) Iterator() iter.Seq[msg] {
+	return func(yield func(msg) bool) {
+		msgIndexes := make([]uint64, 0, len(c.index))
 
-	for k := range c.index {
-		msgIndexes = append(msgIndexes, k)
-	}
-
-	sort.Slice(msgIndexes, func(i, j int) bool {
-		return msgIndexes[i] < msgIndexes[j]
-	})
-
-	i := 0
-
-	return func() (msg, bool) {
-		if i >= len(msgIndexes) {
-			return msg{}, false
+		for k := range c.index {
+			msgIndexes = append(msgIndexes, k)
 		}
 
-		msg := c.index[msgIndexes[i]]
-		i++
+		sort.Slice(msgIndexes, func(i, j int) bool {
+			return msgIndexes[i] < msgIndexes[j]
+		})
 
-		return msg, true
+		for i := 0; i < len(msgIndexes); i++ {
+			if !yield(c.index[msgIndexes[i]]) {
+				break
+			}
+		}
 	}
+}
+
+// PullIterator returns pull-based iterator for the WAL messages.
+// Messages are returned from the oldest to the newest.
+//
+// Should be used like this:
+//
+//	next, stop := wal.PullIterator()
+//	defer stop()
+//	...
+func (c *Wal) PullIterator() (next func() (msg, bool), stop func()) {
+	return iter.Pull(c.Iterator())
 }
 
 // CurrentIndex returns current index of the log.
