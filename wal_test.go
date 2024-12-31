@@ -258,3 +258,34 @@ func TestChecksum_Check_Checksum_Files(t *testing.T) {
 
 	require.NoError(t, os.RemoveAll("./testlogdata"))
 }
+
+func TestChecksum_Recover(t *testing.T) {
+	log, err := NewWAL(Config{
+		Dir:              "./testlogdata",
+		Prefix:           "log_",
+		SegmentThreshold: 2,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
+	require.NoError(t, err)
+
+	for i := 0; i < 10; i++ {
+		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+	}
+
+	// corrupt the data by writing some garbage to the segment file
+	log.log.Write([]byte("corrupted data"))
+
+	require.Error(t, compareChecksums(log.log, log.checksum))
+
+	// recover
+	erasedFiles, err := Recover(Config{
+		Dir:    "./testlogdata",
+		Prefix: "log_",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, len(erasedFiles))
+	require.ElementsMatch(t, []string{"testlogdata/log_4", "testlogdata/log_4.checksum"}, erasedFiles)
+
+	require.NoError(t, os.RemoveAll("./testlogdata"))
+}
