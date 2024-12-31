@@ -76,6 +76,7 @@ type Config struct {
 	IsInSyncDiskMode bool
 }
 
+// NewWAL creates a new WAL with the given configuration.
 func NewWAL(config Config) (*Wal, error) {
 	if err := os.MkdirAll(config.Dir, 0755); err != nil {
 		return nil, errors.Wrap(err, "failed to create log directory")
