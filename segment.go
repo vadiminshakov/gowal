@@ -88,6 +88,23 @@ func segmentInfoAndIndex(segNumbers []int, path string) (*os.File, *os.File, os.
 	return logFileFD, checksumFd, logFileInfo, index, nil
 }
 
+func eraseIfNeeds(segNumbers []int, path string) ([]string, error) {
+	erasedFiles := make([]string, 0)
+	for _, segindex := range segNumbers {
+		erased, err := eraseSegmentIfNeeds(path + strconv.Itoa(segindex))
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to load indexes from msg log file")
+		}
+
+		if erased {
+			erasedFiles = append(erasedFiles, path+strconv.Itoa(segindex))
+			erasedFiles = append(erasedFiles, path+strconv.Itoa(segindex)+checkSumPostfix)
+		}
+	}
+
+	return erasedFiles, nil
+}
+
 // loadSegment loads segment info (file descriptor, name, size, etc) and index from segment file.
 func loadSegment(path string) (fd *os.File, checksumFd *os.File, fileinfo os.FileInfo, index map[uint64]msg, err error) {
 	fd, err = os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0755)
@@ -115,6 +132,33 @@ func loadSegment(path string) (fd *os.File, checksumFd *os.File, fileinfo os.Fil
 	}
 
 	return fd, chk, fileinfo, index, nil
+}
+
+func eraseSegmentIfNeeds(path string) (bool, error) {
+	fd, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0755)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to open log segment file")
+	}
+
+	chk, err := os.OpenFile(path+checkSumPostfix, os.O_RDWR|os.O_CREATE, 0755)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to cheksum file")
+	}
+
+	err = compareChecksums(fd, chk)
+	if err == nil {
+		return false, nil
+	}
+
+	if err = os.Remove(path); err != nil {
+		return false, errors.Wrap(err, "failed to remove corrupted segment")
+	}
+
+	if err = os.Remove(path + checkSumPostfix); err != nil {
+		return false, errors.Wrap(err, "failed to remove corrupted segment checksum file")
+	}
+
+	return true, nil
 }
 
 // findSegmentNumbers finds all segment numbers in the directory.
