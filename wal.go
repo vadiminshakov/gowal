@@ -105,6 +105,15 @@ func NewWAL(config Config) (*Wal, error) {
 		maxSegments: config.MaxSegments, isInSyncDiskMode: config.IsInSyncDiskMode}, nil
 }
 
+func Recover(config Config) ([]string, error) {
+	segmentsNumbers, err := findSegmentNumber(config.Dir, config.Prefix)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to find segment numbers")
+	}
+
+	return eraseIfNeeds(segmentsNumbers, path.Join(config.Dir, config.Prefix))
+}
+
 // Get queries value at specific index in the log log.
 func (c *Wal) Get(index uint64) (string, []byte, bool) {
 	msg, ok := c.index[index]
