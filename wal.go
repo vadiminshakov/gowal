@@ -118,7 +118,7 @@ func UnsafeRecover(dir, segmentPrefix string) ([]string, error) {
 	return removeCorruptedSegments(segmentsNumbers, path.Join(dir, segmentPrefix))
 }
 
-// Get queries value at specific index in the log log.
+// Get queries value at specific index in the log.
 func (c *Wal) Get(index uint64) (string, []byte, bool) {
 	msg, ok := c.index[index]
 	if !ok {

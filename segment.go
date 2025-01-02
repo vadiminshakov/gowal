@@ -94,11 +94,11 @@ func removeCorruptedSegments(segmentNumbers []int, basePath string) ([]string, e
 
 	for _, segmentNumber := range segmentNumbers {
 		segmentPath := basePath + strconv.Itoa(segmentNumber)
-		erased, err := handleCorruptedSegment(segmentPath)
+		removed, err := handleCorruptedSegment(segmentPath)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to process segment %s", segmentPath)
 		}
-		if erased {
+		if removed {
 			removedFiles = append(removedFiles, segmentPath, segmentPath+checkSumPostfix)
 		}
 	}
