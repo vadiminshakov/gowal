@@ -89,6 +89,13 @@ if err != nil {
 }
 ```
 
+### Recover corrupted WAL
+If the WAL is corrupted, you can recover it by calling the `UnsafeRecover` function:
+
+```go
+removedFiles, err := UnsafeRecover("./wal", "segment_")
+```
+
 ### Configuration
 The behavior of the WAL can be configured using several configuration options (`Config` parameter in the `NewWAL` function):
 
