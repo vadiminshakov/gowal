@@ -93,7 +93,7 @@ if err != nil {
 If the WAL is corrupted, you can recover it by calling the `UnsafeRecover` function:
 
 ```go
-removedFiles, err := UnsafeRecover("./wal", "segment_")
+removedFiles, err := wal.UnsafeRecover("./wal", "segment_")
 ```
 
 ### Configuration
