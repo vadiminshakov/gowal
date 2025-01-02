@@ -279,10 +279,10 @@ func TestChecksum_UnsafeRecover(t *testing.T) {
 	require.Error(t, compareChecksums(log.log, log.checksum))
 
 	// recover
-	erasedFiles, err := UnsafeRecover("./testlogdata", "log_")
+	removedFiles, err := UnsafeRecover("./testlogdata", "log_")
 	require.NoError(t, err)
-	require.Equal(t, 2, len(erasedFiles))
-	require.ElementsMatch(t, []string{"testlogdata/log_4", "testlogdata/log_4.checksum"}, erasedFiles)
+	require.Equal(t, 2, len(removedFiles))
+	require.ElementsMatch(t, []string{"testlogdata/log_4", "testlogdata/log_4.checksum"}, removedFiles)
 
 	require.NoError(t, os.RemoveAll("./testlogdata"))
 }
