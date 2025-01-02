@@ -115,7 +115,7 @@ func UnsafeRecover(dir, segmentPrefix string) ([]string, error) {
 		return nil, errors.Wrap(err, "failed to find segment numbers")
 	}
 
-	return eraseIfNeeds(segmentsNumbers, path.Join(dir, segmentPrefix))
+	return removeCorruptedSegments(segmentsNumbers, path.Join(dir, segmentPrefix))
 }
 
 // Get queries value at specific index in the log log.
