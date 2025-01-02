@@ -106,13 +106,16 @@ func NewWAL(config Config) (*Wal, error) {
 		maxSegments: config.MaxSegments, isInSyncDiskMode: config.IsInSyncDiskMode}, nil
 }
 
-func Recover(config Config) ([]string, error) {
-	segmentsNumbers, err := findSegmentNumber(config.Dir, config.Prefix)
+// UnsafeRecover recovers the WAL from the given directory.
+// It is unsafe because it removes all the segment and checksum files that are corrupted (checksums do not match).
+// It returns the list of segment and checksum files that were removed.
+func UnsafeRecover(dir, segmentPrefix string) ([]string, error) {
+	segmentsNumbers, err := findSegmentNumber(dir, segmentPrefix)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to find segment numbers")
 	}
 
-	return eraseIfNeeds(segmentsNumbers, path.Join(config.Dir, config.Prefix))
+	return eraseIfNeeds(segmentsNumbers, path.Join(dir, segmentPrefix))
 }
 
 // Get queries value at specific index in the log log.

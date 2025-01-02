@@ -259,7 +259,7 @@ func TestChecksum_Check_Checksum_Files(t *testing.T) {
 	require.NoError(t, os.RemoveAll("./testlogdata"))
 }
 
-func TestChecksum_Recover(t *testing.T) {
+func TestChecksum_UnsafeRecover(t *testing.T) {
 	log, err := NewWAL(Config{
 		Dir:              "./testlogdata",
 		Prefix:           "log_",
@@ -279,10 +279,7 @@ func TestChecksum_Recover(t *testing.T) {
 	require.Error(t, compareChecksums(log.log, log.checksum))
 
 	// recover
-	erasedFiles, err := Recover(Config{
-		Dir:    "./testlogdata",
-		Prefix: "log_",
-	})
+	erasedFiles, err := UnsafeRecover("./testlogdata", "log_")
 	require.NoError(t, err)
 	require.Equal(t, 2, len(erasedFiles))
 	require.ElementsMatch(t, []string{"testlogdata/log_4", "testlogdata/log_4.checksum"}, erasedFiles)
