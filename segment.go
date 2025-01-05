@@ -221,8 +221,8 @@ func loadIndexes(file *os.File) (map[uint64]msg, error) {
 
 	var msgs []msg
 	dec := gob.NewDecoder(bytes.NewReader(buf))
+	var msgIndexed msg
 	for {
-		var msgIndexed msg
 		if err = dec.Decode(&msgIndexed); err != nil {
 			if err == io.EOF {
 				break
