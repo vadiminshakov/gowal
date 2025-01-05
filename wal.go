@@ -226,5 +226,10 @@ func (c *Wal) Close() error {
 		return errors.Wrap(err, "failed to close checksum file")
 	}
 
+	c.buf.Reset()
+	c.enc = nil
+	c.index = nil
+	c.tmpIndex = nil
+
 	return nil
 }
