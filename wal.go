@@ -76,6 +76,10 @@ type Config struct {
 	IsInSyncDiskMode bool
 }
 
+func init() {
+	gob.Register(msg{})
+}
+
 // NewWAL creates a new WAL with the given configuration.
 func NewWAL(config Config) (*Wal, error) {
 	if err := os.MkdirAll(config.Dir, 0755); err != nil {
