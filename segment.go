@@ -152,7 +152,7 @@ func calculateLastOffset(fd *os.File) (int64, error) {
 			}
 
 			// set offset to the beginning of the file
-			if _, err := fd.Seek(offset, io.SeekStart); err != nil {
+			if _, err := fd.Seek(0, io.SeekStart); err != nil {
 				return 0, errors.Wrap(err, "failed to seek to the beginning of the file")
 			}
 
