@@ -92,7 +92,7 @@ func NewWAL(config Config) (*Wal, error) {
 	}
 
 	// load segments into mem
-	fd, chk, stat, index, err := segmentInfoAndIndex(segmentsNumbers, path.Join(config.Dir, config.Prefix))
+	fd, chk, lastOffset, index, err := segmentInfoAndIndex(segmentsNumbers, path.Join(config.Dir, config.Prefix))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load log segments")
 	}
@@ -105,7 +105,7 @@ func NewWAL(config Config) (*Wal, error) {
 	enc := gob.NewEncoder(&buf)
 
 	return &Wal{log: fd, index: index, checksum: chk, tmpIndex: make(map[uint64]msg),
-		buf: &buf, enc: enc, lastOffset: stat.Size(), pathToLogsDir: config.Dir,
+		buf: &buf, enc: enc, lastOffset: lastOffset, pathToLogsDir: config.Dir,
 		segmentsNumber: numberOfSegments, prefix: config.Prefix, segmentsThreshold: config.SegmentThreshold,
 		maxSegments: config.MaxSegments, isInSyncDiskMode: config.IsInSyncDiskMode}, nil
 }
