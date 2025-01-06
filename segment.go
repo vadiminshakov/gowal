@@ -141,26 +141,22 @@ func calculateLastOffset(fd *os.File) (int64, error) {
 	decoder := gob.NewDecoder(fd)
 	for {
 		var msg msg
-		offset, err := fd.Seek(0, io.SeekCurrent)
+		offset, err := fd.Seek(io.SeekCurrent, 0)
 		if err != nil {
 			return 0, errors.Wrap(err, "failed to get current offset")
 		}
 
-		if err = decoder.Decode(&msg); err != nil {
+		if err := decoder.Decode(&msg); err != nil {
 			if err == io.EOF {
 				break
 			}
 
 			// set offset to the beginning of the file
-			if _, seekErr := fd.Seek(0, io.SeekStart); seekErr != nil {
-				return 0, errors.Wrap(seekErr, "failed to seek to the beginning of the file after error")
+			if _, err := fd.Seek(0, io.SeekStart); err != nil {
+				return 0, errors.Wrap(err, "failed to seek to the beginning of the file")
 			}
 
 			return lastOffset, nil
-		}
-
-		if _, err = fd.Seek(0, io.SeekStart); err != nil {
-			return 0, errors.Wrap(err, "failed to seek to the beginning of the file")
 		}
 
 		lastOffset = offset
