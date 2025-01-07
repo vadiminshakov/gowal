@@ -1,9 +1,9 @@
 package gowal
 
 type msg struct {
+	Idx   uint64
 	Key   string
 	Value []byte
-	Idx   uint64
 }
 
 func (m msg) Index() uint64 {
