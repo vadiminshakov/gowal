@@ -26,12 +26,12 @@ func compareChecksums(fd *os.File, chk *os.File) error {
 		return nil
 	}
 
-	currentOffsetFd, err := fd.Seek(0, 0)
+	_, err = fd.Seek(0, io.SeekStart)
 	if err != nil {
 		return errors.Wrapf(err, "failed to seek to the beginning of the log file %s", fd.Name())
 	}
 
-	currentOffsetChk, err := chk.Seek(0, 0)
+	_, err = chk.Seek(0, io.SeekStart)
 	if err != nil {
 		return errors.Wrapf(err, "failed to seek to the beginning of the checksum file %s", chk.Name())
 	}
@@ -53,16 +53,6 @@ func compareChecksums(fd *os.File, chk *os.File) error {
 		return fmt.Errorf("file %s corrupted, checksums do not match, expected %x, got %x", fd.Name(), sum[len(sum)-5:], buf[len(buf)-5:])
 	}
 
-	_, err = fd.Seek(currentOffsetFd, 0)
-	if err != nil {
-		return errors.Wrapf(err, "failed to restore original position in log file %s", fd.Name())
-	}
-
-	_, err = fd.Seek(currentOffsetChk, 0)
-	if err != nil {
-		return errors.Wrapf(err, "failed to restore original position in checksum file %s", fd.Name())
-	}
-
 	return nil
 }
 
@@ -72,7 +62,7 @@ func writeChecksum(fd *os.File, chk *os.File) error {
 		return errors.Wrap(err, "failed to seek to the beginning of the log file")
 	}
 
-	currentOffset, err := chk.Seek(0, 0)
+	_, err = chk.Seek(0, 0)
 	if err != nil {
 		return errors.Wrap(err, "failed to seek to the beginning of the checksum file")
 	}
@@ -96,7 +86,7 @@ func writeChecksum(fd *os.File, chk *os.File) error {
 		return errors.Wrap(err, "failed to write checksum to checksum file")
 	}
 
-	_, err = fd.Seek(currentOffset, 0)
+	_, err = fd.Seek(0, io.SeekEnd)
 	if err != nil {
 		return errors.Wrap(err, "failed to restore original position in log file")
 	}
