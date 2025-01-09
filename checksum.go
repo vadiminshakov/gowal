@@ -12,34 +12,25 @@ import (
 const checkSumPostfix = ".checksum"
 
 func compareChecksums(fd *os.File, chk *os.File) error {
-	fi, err := fd.Stat()
+	_, err := fd.Seek(0, io.SeekStart)
 	if err != nil {
-		return errors.Wrapf(err, "failed to get file info for log file %s", fi.Name())
-	}
-
-	chkFi, err := chk.Stat()
-	if err != nil {
-		return errors.Wrapf(err, "failed to get file info for checksum file %s", chkFi.Name())
-	}
-
-	if fi.Size() == 0 && chkFi.Size() == 0 {
-		return nil
-	}
-
-	_, err = fd.Seek(0, io.SeekStart)
-	if err != nil {
-		return errors.Wrapf(err, "failed to seek to the beginning of the log file %s", fd.Name())
+		return errors.Wrap(err, "failed to seek to start of log file")
 	}
 
 	_, err = chk.Seek(0, io.SeekStart)
 	if err != nil {
-		return errors.Wrapf(err, "failed to seek to the beginning of the checksum file %s", chk.Name())
+		return errors.Wrap(err, "failed to seek to start of checksum file")
 	}
 
 	h := sha256.New()
 	_, err = io.Copy(h, fd)
 	if err != nil {
 		return errors.Wrapf(err, "failed to copy contents of segment file %s to verify checksum", fd.Name())
+	}
+
+	_, err = fd.Seek(0, io.SeekEnd)
+	if err != nil {
+		return errors.Wrap(err, "failed to seek to end of log file")
 	}
 
 	sum := h.Sum(nil)
@@ -57,14 +48,9 @@ func compareChecksums(fd *os.File, chk *os.File) error {
 }
 
 func writeChecksum(fd *os.File, chk *os.File) error {
-	_, err := fd.Seek(0, 0)
+	_, err := fd.Seek(0, io.SeekStart)
 	if err != nil {
-		return errors.Wrap(err, "failed to seek to the beginning of the log file")
-	}
-
-	_, err = chk.Seek(0, 0)
-	if err != nil {
-		return errors.Wrap(err, "failed to seek to the beginning of the checksum file")
+		return errors.Wrap(err, "failed to seek to start of log file")
 	}
 
 	h := sha256.New()
@@ -73,22 +59,27 @@ func writeChecksum(fd *os.File, chk *os.File) error {
 		return errors.Wrap(err, "failed to copy contents of segment file to calculate checksum")
 	}
 
+	_, err = fd.Seek(0, io.SeekEnd)
+	if err != nil {
+		return errors.Wrap(err, "failed to seek to end of log file")
+	}
+
 	sum := h.Sum(nil)
 
-	// clear old checksum and write new
 	err = chk.Truncate(0)
 	if err != nil {
 		return errors.Wrap(err, "failed to truncate checksum file")
 	}
 
-	_, err = chk.Write(sum)
+	_, err = chk.Seek(0, io.SeekStart)
 	if err != nil {
-		return errors.Wrap(err, "failed to write checksum to checksum file")
+		return errors.Wrap(err, "failed to seek to start of checksum file")
 	}
 
-	_, err = fd.Seek(0, io.SeekEnd)
+	fmt.Printf("write sum: %x\n", sum)
+	_, err = chk.WriteAt(sum, 0)
 	if err != nil {
-		return errors.Wrap(err, "failed to restore original position in log file")
+		return errors.Wrap(err, "failed to write checksum to checksum file")
 	}
 
 	return nil
