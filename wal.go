@@ -76,10 +76,6 @@ type Config struct {
 	IsInSyncDiskMode bool
 }
 
-func init() {
-	gob.Register(msg{})
-}
-
 // NewWAL creates a new WAL with the given configuration.
 func NewWAL(config Config) (*Wal, error) {
 	if err := os.MkdirAll(config.Dir, 0755); err != nil {
@@ -158,7 +154,6 @@ func (c *Wal) Write(index uint64, key string, value []byte) error {
 	if err := writeChecksum(c.log, c.checksum); err != nil {
 		return errors.Wrap(err, "failed to write checksum")
 	}
-
 	fmt.Printf("Wrote message at offset %d: index=%d, key=%s to segment %s\n", c.lastOffset, index, key, c.log.Name())
 
 	if c.isInSyncDiskMode {
@@ -218,6 +213,9 @@ func (c *Wal) PullIterator() (next func() (msg, bool), stop func()) {
 
 // Close closes log and checksum files.
 func (c *Wal) Close() error {
+	c.buf.Reset()
+	c.enc = nil
+
 	if err := c.log.Close(); err != nil {
 		return errors.Wrap(err, "failed to close log log file")
 	}
@@ -226,8 +224,6 @@ func (c *Wal) Close() error {
 		return errors.Wrap(err, "failed to close checksum file")
 	}
 
-	c.buf.Reset()
-	c.enc = nil
 	c.index = nil
 	c.tmpIndex = nil
 
