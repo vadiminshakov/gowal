@@ -1,7 +1,6 @@
 package gowal
 
 import (
-	"bytes"
 	"encoding/gob"
 	"fmt"
 	"github.com/pkg/errors"
@@ -118,8 +117,20 @@ func loadSegment(path string) (fd *os.File, checksumFd *os.File, lastOffset int6
 		return nil, nil, 0, nil, errors.Wrap(err, "failed to cheksum file")
 	}
 
-	if err = compareChecksums(fd, chk); err != nil {
-		return nil, nil, 0, nil, errors.Wrap(err, "failed to compare checksums")
+	statFd, err := fd.Stat()
+	if err != nil {
+		return nil, nil, 0, nil, err
+	}
+
+	statChk, err := chk.Stat()
+	if err != nil {
+		return nil, nil, 0, nil, err
+	}
+
+	if statFd.Size() != 0 && statChk.Size() != 0 {
+		if err = compareChecksums(fd, chk); err != nil {
+			return nil, nil, 0, nil, errors.Wrap(err, "failed to compare checksums")
+		}
 	}
 
 	lastOffset, err = calculateLastOffset(fd)
@@ -136,38 +147,12 @@ func loadSegment(path string) (fd *os.File, checksumFd *os.File, lastOffset int6
 }
 
 func calculateLastOffset(fd *os.File) (int64, error) {
-	var lastOffset int64
-
-	decoder := gob.NewDecoder(fd)
-	for {
-		var msg msg
-		offset, err := fd.Seek(0, io.SeekCurrent)
-		if err != nil {
-			return 0, errors.Wrap(err, "failed to get current offset")
-		}
-
-		if err := decoder.Decode(&msg); err != nil {
-			if err == io.EOF {
-				break
-			}
-
-			// set offset to the beginning of the file
-			if _, err := fd.Seek(0, io.SeekStart); err != nil {
-				return 0, errors.Wrap(err, "failed to seek to the beginning of the file")
-			}
-
-			return lastOffset, nil
-		}
-
-		lastOffset = offset
+	fileInfo, err := fd.Stat()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get file info: %v", err)
 	}
 
-	// set offset to the beginning of the file
-	if _, err := fd.Seek(0, io.SeekStart); err != nil {
-		return 0, errors.Wrap(err, "failed to seek to the beginning of the file")
-	}
-
-	return lastOffset, nil
+	return fileInfo.Size(), nil
 }
 
 // handleCorruptedSegment checks the checksum and removes the segment and checksum files if corrupted.
@@ -183,6 +168,20 @@ func handleCorruptedSegment(segmentPath string) (bool, error) {
 		return false, errors.Wrap(err, "failed to open checksum file")
 	}
 	defer checksumFile.Close()
+
+	statFd, err := file.Stat()
+	if err != nil {
+		return false, err
+	}
+
+	statChk, err := checksumFile.Stat()
+	if err != nil {
+		return false, err
+	}
+
+	if statFd.Size() == 0 && statChk.Size() == 0 {
+		return true, nil
+	}
 
 	if err := compareChecksums(file, checksumFile); err == nil {
 		return false, nil // Checksums match; no need to erase.
@@ -245,28 +244,30 @@ func findSegmentNumber(dir string, prefix string) (segmentsNumbers []int, err er
 
 // loadIndexes loads index from log file.
 func loadIndexes(file *os.File) (map[uint64]msg, error) {
-	buf, err := io.ReadAll(file)
+	_, err := file.Seek(0, io.SeekStart)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to read log file")
-	}
-
-	if len(buf) == 0 {
-		return make(map[uint64]msg), nil
+		return nil, errors.Wrap(err, "failed to seek to start of log file")
 	}
 
 	var msgs []msg
-	dec := gob.NewDecoder(bytes.NewReader(buf))
+	dec := gob.NewDecoder(file)
 
 	for {
 		var msgIndexed msg
-		if err = dec.Decode(&msgIndexed); err != nil {
+		if err := dec.Decode(&msgIndexed); err != nil {
 			if err == io.EOF {
 				break
 			}
+
 			return nil, errors.Wrap(err, "failed to decode indexed msg from log")
 		}
 
 		msgs = append(msgs, msgIndexed)
+	}
+
+	_, err = file.Seek(0, io.SeekEnd)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to seek to end of log file")
 	}
 
 	index := make(map[uint64]msg, len(msgs))
