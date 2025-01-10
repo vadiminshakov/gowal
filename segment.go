@@ -1,9 +1,9 @@
 package gowal
 
 import (
-	"encoding/gob"
 	"fmt"
 	"github.com/pkg/errors"
+	msgpack "github.com/vmihailenco/msgpack/v5"
 	"io"
 	"maps"
 	"os"
@@ -33,7 +33,7 @@ func (c *Wal) removeOldestSegment() error {
 // openNewSegment creates new segment.
 func (c *Wal) openNewSegment() error {
 	newSegmentName := path.Join(c.pathToLogsDir, c.prefix+strconv.Itoa(c.segmentsNumber))
-	logFile, err := os.OpenFile(newSegmentName, os.O_RDWR|os.O_CREATE, 0755)
+	logFile, err := os.OpenFile(newSegmentName, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0755)
 	if err != nil {
 		return errors.Wrap(err, "failed to create new log file")
 	}
@@ -48,9 +48,6 @@ func (c *Wal) openNewSegment() error {
 	c.log = logFile
 	c.checksum = checksumFile
 	c.lastOffset = 0
-
-	c.buf.Reset()
-	c.enc = gob.NewEncoder(c.buf)
 
 	return nil
 }
@@ -76,6 +73,10 @@ func segmentInfoAndIndex(segNumbers []int, path string) (*os.File, *os.File, int
 		err            error
 	)
 	for _, segindex := range segNumbers {
+		if logFileFD != nil {
+			logFileFD.Close()
+		}
+
 		logFileFD, checksumFd, lastOffset, idxFromSegment, err = loadSegment(path + strconv.Itoa(segindex))
 		if err != nil {
 			return nil, nil, 0, nil, errors.Wrap(err, "failed to load indexes from msg log file")
@@ -107,7 +108,7 @@ func removeCorruptedSegments(segmentNumbers []int, basePath string) ([]string, e
 
 // loadSegment loads segment info (file descriptor, name, size, etc) and index from segment file.
 func loadSegment(path string) (fd *os.File, checksumFd *os.File, lastOffset int64, index map[uint64]msg, err error) {
-	fd, err = os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0755)
+	fd, err = os.OpenFile(path, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0755)
 	if err != nil {
 		return nil, nil, 0, nil, errors.Wrap(err, "failed to open log segment file")
 	}
@@ -152,12 +153,16 @@ func calculateLastOffset(fd *os.File) (int64, error) {
 		return 0, fmt.Errorf("failed to get file info: %v", err)
 	}
 
-	return fileInfo.Size(), nil
+	if fileInfo.Size() == 0 {
+		return 0, nil
+	}
+
+	return fileInfo.Size() + 1, nil
 }
 
 // handleCorruptedSegment checks the checksum and removes the segment and checksum files if corrupted.
 func handleCorruptedSegment(segmentPath string) (bool, error) {
-	file, err := os.OpenFile(segmentPath, os.O_RDWR|os.O_CREATE, 0755)
+	file, err := os.OpenFile(segmentPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0755)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to open segment file")
 	}
@@ -244,13 +249,10 @@ func findSegmentNumber(dir string, prefix string) (segmentsNumbers []int, err er
 
 // loadIndexes loads index from log file.
 func loadIndexes(file *os.File) (map[uint64]msg, error) {
-	_, err := file.Seek(0, io.SeekStart)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to seek to start of log file")
-	}
+	file.Seek(0, io.SeekStart)
 
-	var msgs []msg
-	dec := gob.NewDecoder(file)
+	index := make(map[uint64]msg)
+	dec := msgpack.NewDecoder(file)
 
 	for {
 		var msgIndexed msg
@@ -258,21 +260,9 @@ func loadIndexes(file *os.File) (map[uint64]msg, error) {
 			if err == io.EOF {
 				break
 			}
-
 			return nil, errors.Wrap(err, "failed to decode indexed msg from log")
 		}
-
-		msgs = append(msgs, msgIndexed)
-	}
-
-	_, err = file.Seek(0, io.SeekEnd)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to seek to end of log file")
-	}
-
-	index := make(map[uint64]msg, len(msgs))
-	for _, idxMsg := range msgs {
-		index[idxMsg.Idx] = idxMsg
+		index[msgIndexed.Idx] = msgIndexed
 	}
 
 	return index, nil
