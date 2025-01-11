@@ -5,10 +5,12 @@ import (
 	"encoding/gob"
 	"fmt"
 	"github.com/pkg/errors"
+	"github.com/vmihailenco/msgpack/v5"
 	"iter"
 	"os"
 	"path"
 	"sort"
+	"sync/atomic"
 )
 
 var ErrExists = errors.New("msg with such index already exists")
@@ -44,6 +46,8 @@ type Wal struct {
 
 	// offset of last record in file
 	lastOffset int64
+
+	lastIndex atomic.Uint64
 
 	// number of segments for log
 	segmentsNumber int
@@ -100,10 +104,21 @@ func NewWAL(config Config) (*Wal, error) {
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
 
-	return &Wal{log: fd, index: index, checksum: chk, tmpIndex: make(map[uint64]msg),
+	w := &Wal{log: fd, index: index, checksum: chk, tmpIndex: make(map[uint64]msg),
 		buf: &buf, enc: enc, lastOffset: lastOffset, pathToLogsDir: config.Dir,
 		segmentsNumber: numberOfSegments, prefix: config.Prefix, segmentsThreshold: config.SegmentThreshold,
-		maxSegments: config.MaxSegments, isInSyncDiskMode: config.IsInSyncDiskMode}, nil
+		maxSegments: config.MaxSegments, isInSyncDiskMode: config.IsInSyncDiskMode}
+
+	lastIndex := uint64(0)
+	for v := range w.Iterator() {
+		if v.Idx > lastIndex {
+			lastIndex = v.Idx
+		}
+	}
+
+	w.lastIndex.Store(lastIndex)
+
+	return w, nil
 }
 
 // UnsafeRecover recovers the WAL from the given directory.
@@ -130,7 +145,7 @@ func (c *Wal) Get(index uint64) (string, []byte, bool) {
 
 // CurrentIndex returns current index of the log.
 func (c *Wal) CurrentIndex() uint64 {
-	return uint64(len(c.index))
+	return c.lastIndex.Load()
 }
 
 // Write writes key-value pair to the log.
@@ -143,11 +158,12 @@ func (c *Wal) Write(index uint64, key string, value []byte) error {
 		return err
 	}
 
-	if err := c.enc.Encode(msg{Key: key, Value: value, Idx: index}); err != nil {
+	data, err := msgpack.Marshal(msg{Key: key, Value: value, Idx: index})
+	if err != nil {
 		return errors.Wrap(err, "failed to encode msg")
 	}
 
-	if _, err := c.log.WriteAt(c.buf.Bytes(), c.lastOffset); err != nil {
+	if _, err := c.log.Write(data); err != nil {
 		return errors.Wrap(err, "failed to write msg to log")
 	}
 
@@ -166,6 +182,7 @@ func (c *Wal) Write(index uint64, key string, value []byte) error {
 	}
 
 	c.lastOffset += int64(c.buf.Len())
+	c.lastIndex.Add(1)
 	c.buf.Reset()
 	c.index[index] = msg{Key: key, Value: value, Idx: index}
 
@@ -213,9 +230,6 @@ func (c *Wal) PullIterator() (next func() (msg, bool), stop func()) {
 
 // Close closes log and checksum files.
 func (c *Wal) Close() error {
-	c.buf.Reset()
-	c.enc = nil
-
 	if err := c.log.Close(); err != nil {
 		return errors.Wrap(err, "failed to close log log file")
 	}
@@ -223,9 +237,6 @@ func (c *Wal) Close() error {
 	if err := c.checksum.Close(); err != nil {
 		return errors.Wrap(err, "failed to close checksum file")
 	}
-
-	c.index = nil
-	c.tmpIndex = nil
 
 	return nil
 }
