@@ -169,7 +169,6 @@ func (c *Wal) Write(index uint64, key string, value []byte) error {
 	if err := writeChecksum(c.log, c.checksum); err != nil {
 		return errors.Wrap(err, "failed to write checksum")
 	}
-	//fmt.Printf("Add: index=%d, key=%s to segment %s\n", index, key, c.log.Name())
 
 	if c.isInSyncDiskMode {
 		if err := c.log.Sync(); err != nil {
