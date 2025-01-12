@@ -51,9 +51,9 @@ func TestIterator(t *testing.T) {
 
 	t.Run("Iterator", func(t *testing.T) {
 		i := 0
-		for msg := range log.Iterator() {
-			require.Equal(t, "key"+strconv.Itoa(i), msg.Key)
-			require.Equal(t, "value"+strconv.Itoa(i), string(msg.Value))
+		for m := range log.Iterator() {
+			require.Equal(t, "key"+strconv.Itoa(i), m.Key)
+			require.Equal(t, "value"+strconv.Itoa(i), string(m.Value))
 			i++
 		}
 	})
