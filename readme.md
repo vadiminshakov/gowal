@@ -4,7 +4,9 @@
 
 # GoWAL - Write-Ahead Logging in Go
 
-GoWAL is a simple, efficient **Write-Ahead Log (WAL)** library written in Go. It allows you to store logs as an append-only log structure, which is useful for applications that require crash recovery, transaction logging, or high-availability systems. GoWAL is optimized for performance with configurable segment rotation and in-memory indexing.
+GoWAL is a simple, efficient **Write-Ahead Log (WAL)** library written in Go.
+It allows you to store data in an append-only log structure, which is useful for applications that require crash recovery, transaction logging, or high-availability systems. 
+GoWAL is optimized for performance with configurable segment rotation and in-memory indexing.
 
 ## Features
 
