@@ -3,14 +3,14 @@ package gowal
 import (
 	"bytes"
 	"encoding/gob"
-	"github.com/pkg/errors"
-	"github.com/vmihailenco/msgpack/v5"
 	"iter"
 	"os"
 	"path"
-	"sort"
-	"sync/atomic"
 	"slices"
+	"sync/atomic"
+
+	"github.com/pkg/errors"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 var ErrExists = errors.New("msg with such index already exists")
@@ -204,7 +204,7 @@ func (c *Wal) Iterator() iter.Seq[msg] {
 		}
 
 		slices.Sort(msgIndexes)
-	
+
 		for _, v := range msgIndexes {
 			if !yield(c.index[v]) {
 				break

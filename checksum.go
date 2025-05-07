@@ -70,11 +70,6 @@ func writeChecksum(fd *os.File, chk *os.File) error {
 		return errors.Wrap(err, "failed to truncate checksum file")
 	}
 
-	//_, err = chk.Seek(0, io.SeekStart)
-	//if err != nil {
-	//	return errors.Wrap(err, "failed to seek to start of checksum file")
-	//}
-
 	_, err = chk.Write(sum)
 	if err != nil {
 		return errors.Wrap(err, "failed to write checksum to checksum file")
