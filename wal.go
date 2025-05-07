@@ -10,6 +10,7 @@ import (
 	"path"
 	"sort"
 	"sync/atomic"
+	"slices"
 )
 
 var ErrExists = errors.New("msg with such index already exists")
@@ -202,12 +203,10 @@ func (c *Wal) Iterator() iter.Seq[msg] {
 			msgIndexes = append(msgIndexes, k)
 		}
 
-		sort.Slice(msgIndexes, func(i, j int) bool {
-			return msgIndexes[i] < msgIndexes[j]
-		})
-
-		for i := 0; i < len(msgIndexes); i++ {
-			if !yield(c.index[msgIndexes[i]]) {
+		slices.Sort(msgIndexes)
+	
+		for _, v := range msgIndexes {
+			if !yield(c.index[v]) {
 				break
 			}
 		}
