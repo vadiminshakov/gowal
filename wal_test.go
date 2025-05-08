@@ -150,7 +150,7 @@ func TestServiceDownUpAndRepairIndex(t *testing.T) {
 		return NewWAL(Config{
 			Dir:              "./testlogdata",
 			Prefix:           "log_",
-			SegmentThreshold: 10,
+			SegmentThreshold: segmentThreshold,
 			MaxSegments:      5,
 			IsInSyncDiskMode: false,
 		})
@@ -160,7 +160,13 @@ func TestServiceDownUpAndRepairIndex(t *testing.T) {
 	log, err := initWal()
 	require.NoError(t, err)
 
-	for i := 0; i < segmentThreshold+(segmentThreshold/2); i++ {
+	// create first segment
+	for i := 0; i < segmentThreshold; i++ {
+		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+	}
+
+	// create second segment
+	for i := segmentThreshold; i < segmentThreshold*2; i++ {
 		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
 	}
 
@@ -172,7 +178,7 @@ func TestServiceDownUpAndRepairIndex(t *testing.T) {
 	require.NoError(t, err)
 
 	// check
-	for i := 0; i < segmentThreshold+(segmentThreshold/2); i++ {
+	for i := range segmentThreshold*2 {
 		require.Equal(t, "key"+strconv.Itoa(i), log.index[uint64(i)].Key)
 		require.Equal(t, "value"+strconv.Itoa(i), string(log.index[uint64(i)].Value))
 	}
