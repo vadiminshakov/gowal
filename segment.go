@@ -55,9 +55,6 @@ func (c *Wal) openNewSegment() error {
 // oldestSegmentName returns name of the oldest segment.
 func (c *Wal) oldestSegmentName() string {
 	oldestSegmentNumber := c.segmentsNumber - c.maxSegments
-	if oldestSegmentNumber < 0 {
-		oldestSegmentNumber = 0
-	}
 	return path.Join(c.pathToLogsDir, c.prefix+strconv.Itoa(oldestSegmentNumber))
 }
 
