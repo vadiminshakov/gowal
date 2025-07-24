@@ -16,6 +16,14 @@ import (
 // removeOldestSegment deletes the oldest segment.
 func (c *Wal) removeOldestSegment() error {
 	oldestSegment := c.oldestSegmentName()
+	
+	// load index of the segment we're about to remove to clean up main index
+	oldestSegmentIndex, err := loadIndexFromSegment(oldestSegment)
+	if err != nil {
+		return errors.Wrap(err, "failed to load index of oldest segment")
+	}
+	
+	// remove the segment files
 	if err := os.Remove(oldestSegment); err != nil {
 		return errors.Wrap(err, "failed to remove oldest segment")
 	}
@@ -24,8 +32,10 @@ func (c *Wal) removeOldestSegment() error {
 		return errors.Wrap(err, "failed to remove oldest segment checksum file")
 	}
 
-	c.index = c.tmpIndex
-	c.tmpIndex = make(map[uint64]msg)
+	// remove entries from main index that belonged to the deleted segment
+	for idx := range oldestSegmentIndex {
+		delete(c.index, idx)
+	}
 
 	return nil
 }
@@ -44,6 +54,10 @@ func (c *Wal) openNewSegment() error {
 	}
 
 	c.segmentsNumber++
+
+	// transfer tmpIndex to main index when creating new segment
+	maps.Copy(c.index, c.tmpIndex)
+	c.tmpIndex = make(map[uint64]msg)
 
 	c.log = logFile
 	c.checksum = checksumFile
@@ -276,4 +290,15 @@ func extractSegmentNum(segmentName string) (int, error) {
 	}
 
 	return i, nil
+}
+
+// loadIndexFromSegment loads only the index from a segment file
+func loadIndexFromSegment(segmentPath string) (map[uint64]msg, error) {
+	file, err := os.Open(segmentPath)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to open segment file for index loading")
+	}
+	defer file.Close()
+
+	return loadIndexes(file)
 }
