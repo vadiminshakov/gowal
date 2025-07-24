@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"slices"
+	"sync"
 	"sync/atomic"
 
 	"github.com/pkg/errors"
@@ -22,6 +23,9 @@ var ErrExists = errors.New("msg with such index already exists")
 //
 // Index stored in memory and loaded from disk on Wal init.
 type Wal struct {
+	// mutex for thread safety
+	mu sync.RWMutex
+
 	// append-only log with proposed messages that node consumed
 	log *os.File
 
@@ -135,6 +139,9 @@ func UnsafeRecover(dir, segmentPrefix string) ([]string, error) {
 
 // Get queries value at specific index in the log.
 func (c *Wal) Get(index uint64) (string, []byte, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	
 	msg, ok := c.index[index]
 	if !ok {
 		return "", nil, false
@@ -150,8 +157,11 @@ func (c *Wal) CurrentIndex() uint64 {
 
 // Write writes key-value pair to the log.
 func (c *Wal) Write(index uint64, key string, value []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
 	if _, exists := c.index[index]; exists {
-		return ErrExists // Предотвращаем дублирование индексов
+		return ErrExists
 	}
 
 	if err := c.rotateIfNeeded(index, key, value); err != nil {
@@ -197,16 +207,28 @@ func (c *Wal) Write(index uint64, key string, value []byte) error {
 //		...
 func (c *Wal) Iterator() iter.Seq[msg] {
 	return func(yield func(msg) bool) {
+		c.mu.RLock()
+		
 		msgIndexes := make([]uint64, 0, len(c.index))
-
 		for k := range c.index {
 			msgIndexes = append(msgIndexes, k)
 		}
+		
+		// Create a copy of messages to avoid holding lock during iteration
+		msgs := make([]msg, len(msgIndexes))
+		for i, idx := range msgIndexes {
+			msgs[i] = c.index[idx]
+		}
+		c.mu.RUnlock()
 
-		slices.Sort(msgIndexes)
+		slices.SortFunc(msgs, func(a, b msg) int {
+			if a.Idx < b.Idx { return -1 }
+			if a.Idx > b.Idx { return 1 }
+			return 0
+		})
 
-		for _, v := range msgIndexes {
-			if !yield(c.index[v]) {
+		for _, msg := range msgs {
+			if !yield(msg) {
 				break
 			}
 		}
@@ -227,6 +249,9 @@ func (c *Wal) PullIterator() (next func() (msg, bool), stop func()) {
 
 // Close closes log and checksum files.
 func (c *Wal) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
 	if err := c.log.Close(); err != nil {
 		return errors.Wrap(err, "failed to close log log file")
 	}
