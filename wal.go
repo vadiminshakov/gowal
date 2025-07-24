@@ -142,12 +142,19 @@ func (c *Wal) Get(index uint64) (string, []byte, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	
+	// check main index first
 	msg, ok := c.index[index]
-	if !ok {
-		return "", nil, false
+	if ok {
+		return msg.Key, msg.Value, true
+	}
+	
+	// check temporary index for current segment
+	msg, ok = c.tmpIndex[index]
+	if ok {
+		return msg.Key, msg.Value, true
 	}
 
-	return msg.Key, msg.Value, true
+	return "", nil, false
 }
 
 // CurrentIndex returns current index of the log.
@@ -164,7 +171,7 @@ func (c *Wal) Write(index uint64, key string, value []byte) error {
 		return ErrExists
 	}
 
-	if err := c.rotateIfNeeded(index, key, value); err != nil {
+	if err := c.rotateIfNeeded(); err != nil {
 		return err
 	}
 
@@ -193,7 +200,7 @@ func (c *Wal) Write(index uint64, key string, value []byte) error {
 	c.lastOffset += int64(c.buf.Len())
 	c.lastIndex.Add(1)
 	c.buf.Reset()
-	c.index[index] = msg{Key: key, Value: value, Idx: index}
+	c.tmpIndex[index] = msg{Key: key, Value: value, Idx: index}
 
 	return nil
 }
@@ -209,15 +216,24 @@ func (c *Wal) Iterator() iter.Seq[msg] {
 	return func(yield func(msg) bool) {
 		c.mu.RLock()
 		
-		msgIndexes := make([]uint64, 0, len(c.index))
-		for k := range c.index {
+		// collect indexes from both main index and tmpIndex
+		allIndexes := make(map[uint64]msg, len(c.index)+len(c.tmpIndex))
+		for k, v := range c.index {
+			allIndexes[k] = v
+		}
+		for k, v := range c.tmpIndex {
+			allIndexes[k] = v
+		}
+		
+		msgIndexes := make([]uint64, 0, len(allIndexes))
+		for k := range allIndexes {
 			msgIndexes = append(msgIndexes, k)
 		}
 		
-		// Create a copy of messages to avoid holding lock during iteration
+		// create a copy of messages to avoid holding lock during iteration
 		msgs := make([]msg, len(msgIndexes))
 		for i, idx := range msgIndexes {
-			msgs[i] = c.index[idx]
+			msgs[i] = allIndexes[idx]
 		}
 		c.mu.RUnlock()
 
