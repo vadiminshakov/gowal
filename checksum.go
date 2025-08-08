@@ -1,10 +1,10 @@
 package gowal
 
 import (
-	"bytes"
-	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"github.com/pkg/errors"
+	"hash/crc32"
 	"io"
 	"os"
 )
@@ -24,21 +24,23 @@ func compareChecksums(fd *os.File, chk *os.File) error {
 	}
 	defer chk.Close()
 
-	h := sha256.New()
+	h := crc32.NewIEEE()
 	_, err = io.Copy(h, fd)
 	if err != nil {
 		return errors.Wrapf(err, "failed to copy contents of segment file %s to verify checksum", fd.Name())
 	}
 
-	sum := h.Sum(nil)
+	expectedSum := h.Sum32()
 
-	buf, err := io.ReadAll(chk)
+	buf := make([]byte, 4)
+	_, err = io.ReadFull(chk, buf)
 	if err != nil {
 		return errors.Wrapf(err, "failed to read checksum file %s", chk.Name())
 	}
 
-	if !bytes.Equal(sum, buf) {
-		return fmt.Errorf("file %s corrupted, checksums do not match, expected %x, got %x", fd.Name(), sum[len(sum)-5:], buf[len(buf)-5:])
+	actualSum := binary.BigEndian.Uint32(buf)
+	if expectedSum != actualSum {
+		return fmt.Errorf("file %s corrupted, checksums do not match, expected %x, got %x", fd.Name(), expectedSum, actualSum)
 	}
 
 	return nil
@@ -51,15 +53,15 @@ func writeChecksum(fd *os.File, chk *os.File) error {
 	}
 	defer fd.Close()
 
-	h := sha256.New()
+	h := crc32.NewIEEE()
 	_, err = io.Copy(h, fd)
 	if err != nil {
 		return errors.Wrap(err, "failed to copy contents of segment file to calculate checksum")
 	}
 
-	sum := h.Sum(nil)
+	sum := h.Sum32()
 
-	chk, err = os.OpenFile(chk.Name(), os.O_RDWR|os.O_CREATE, 0755)
+	chk, err = os.OpenFile(chk.Name(), os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		return errors.Wrap(err, "failed to create new log file")
 	}
@@ -70,7 +72,9 @@ func writeChecksum(fd *os.File, chk *os.File) error {
 		return errors.Wrap(err, "failed to truncate checksum file")
 	}
 
-	_, err = chk.Write(sum)
+	buf := make([]byte, 4)
+	binary.BigEndian.PutUint32(buf, sum)
+	_, err = chk.Write(buf)
 	if err != nil {
 		return errors.Wrap(err, "failed to write checksum to checksum file")
 	}
