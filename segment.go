@@ -43,12 +43,12 @@ func (c *Wal) removeOldestSegment() error {
 // openNewSegment creates new segment.
 func (c *Wal) openNewSegment() error {
 	newSegmentName := path.Join(c.pathToLogsDir, c.prefix+strconv.Itoa(c.segmentsNumber))
-	logFile, err := os.OpenFile(newSegmentName, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0755)
+	logFile, err := os.OpenFile(newSegmentName, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		return errors.Wrap(err, "failed to create new log file")
 	}
 
-	checksumFile, err := os.OpenFile(newSegmentName+checkSumPostfix, os.O_RDWR|os.O_CREATE, 0755)
+	checksumFile, err := os.OpenFile(newSegmentName+checkSumPostfix, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		return errors.Wrap(err, "failed to create new log file")
 	}
@@ -119,12 +119,12 @@ func removeCorruptedSegments(segmentNumbers []int, basePath string) ([]string, e
 
 // loadSegment loads segment info (file descriptor, name, size, etc) and index from segment file.
 func loadSegment(path string) (fd *os.File, checksumFd *os.File, lastOffset int64, index map[uint64]msg, err error) {
-	fd, err = os.OpenFile(path, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0755)
+	fd, err = os.OpenFile(path, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		return nil, nil, 0, nil, errors.Wrap(err, "failed to open log segment file")
 	}
 
-	chk, err := os.OpenFile(path+checkSumPostfix, os.O_RDWR|os.O_CREATE, 0755)
+	chk, err := os.OpenFile(path+checkSumPostfix, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		return nil, nil, 0, nil, errors.Wrap(err, "failed to cheksum file")
 	}
@@ -173,13 +173,13 @@ func calculateLastOffset(fd *os.File) (int64, error) {
 
 // handleCorruptedSegment checks the checksum and removes the segment and checksum files if corrupted.
 func handleCorruptedSegment(segmentPath string) (bool, error) {
-	file, err := os.OpenFile(segmentPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0755)
+	file, err := os.OpenFile(segmentPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to open segment file")
 	}
 	defer file.Close()
 
-	checksumFile, err := os.OpenFile(segmentPath+checkSumPostfix, os.O_RDWR|os.O_CREATE, 0755)
+	checksumFile, err := os.OpenFile(segmentPath+checkSumPostfix, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to open checksum file")
 	}
