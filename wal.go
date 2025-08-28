@@ -141,13 +141,13 @@ func UnsafeRecover(dir, segmentPrefix string) ([]string, error) {
 func (c *Wal) Get(index uint64) (string, []byte, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	// check main index first
 	msg, ok := c.index[index]
 	if ok {
 		return msg.Key, msg.Value, true
 	}
-	
+
 	// check temporary index for current segment
 	msg, ok = c.tmpIndex[index]
 	if ok {
@@ -166,7 +166,7 @@ func (c *Wal) CurrentIndex() uint64 {
 func (c *Wal) Write(index uint64, key string, value []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	if _, exists := c.index[index]; exists {
 		return ErrExists
 	}
@@ -205,6 +205,67 @@ func (c *Wal) Write(index uint64, key string, value []byte) error {
 	return nil
 }
 
+// WriteTombstone writes a tombstone record for the given index.
+// If no record exists for the index, returns nil (no-op).
+// If a record exists, overwrites it with a tombstone.
+func (c *Wal) WriteTombstone(index uint64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// check if record exists in main index or temp index
+	var existingMsg msg
+	var exists bool
+
+	if msg, ok := c.index[index]; ok {
+		existingMsg = msg
+		exists = true
+	} else if msg, ok := c.tmpIndex[index]; ok {
+		existingMsg = msg
+		exists = true
+	}
+
+	// if no record exists, return nil (no-op)
+	if !exists {
+		return nil
+	}
+
+	if err := c.rotateIfNeeded(); err != nil {
+		return err
+	}
+
+	// create tombstone with existing key
+	tombstone := msg{Key: existingMsg.Key, Value: []byte("tombstone"), Idx: index}
+	data, err := msgpack.Marshal(tombstone)
+	if err != nil {
+		return errors.Wrap(err, "failed to encode tombstone")
+	}
+
+	if _, err := c.log.Write(data); err != nil {
+		return errors.Wrap(err, "failed to write tombstone to log")
+	}
+
+	if err := writeChecksum(c.log, c.checksum); err != nil {
+		return errors.Wrap(err, "failed to write checksum")
+	}
+
+	if c.isInSyncDiskMode {
+		if err := c.log.Sync(); err != nil {
+			return errors.Wrap(err, "failed to sync log")
+		}
+		if err := c.checksum.Sync(); err != nil {
+			return errors.Wrap(err, "failed to sync checksum")
+		}
+	}
+
+	c.lastOffset += int64(len(data))
+	c.tmpIndex[index] = tombstone
+
+	// remove from main index if it exists there to avoid confusion
+	delete(c.index, index)
+
+	return nil
+}
+
 // Iterator returns push-based iterator for the WAL messages.
 // Messages are returned from the oldest to the newest.
 //
@@ -215,7 +276,7 @@ func (c *Wal) Write(index uint64, key string, value []byte) error {
 func (c *Wal) Iterator() iter.Seq[msg] {
 	return func(yield func(msg) bool) {
 		c.mu.RLock()
-		
+
 		// collect indexes from both main index and tmpIndex
 		allIndexes := make(map[uint64]msg, len(c.index)+len(c.tmpIndex))
 		for k, v := range c.index {
@@ -224,12 +285,12 @@ func (c *Wal) Iterator() iter.Seq[msg] {
 		for k, v := range c.tmpIndex {
 			allIndexes[k] = v
 		}
-		
+
 		msgIndexes := make([]uint64, 0, len(allIndexes))
 		for k := range allIndexes {
 			msgIndexes = append(msgIndexes, k)
 		}
-		
+
 		// create a copy of messages to avoid holding lock during iteration
 		msgs := make([]msg, len(msgIndexes))
 		for i, idx := range msgIndexes {
@@ -238,8 +299,12 @@ func (c *Wal) Iterator() iter.Seq[msg] {
 		c.mu.RUnlock()
 
 		slices.SortFunc(msgs, func(a, b msg) int {
-			if a.Idx < b.Idx { return -1 }
-			if a.Idx > b.Idx { return 1 }
+			if a.Idx < b.Idx {
+				return -1
+			}
+			if a.Idx > b.Idx {
+				return 1
+			}
 			return 0
 		})
 
@@ -267,7 +332,7 @@ func (c *Wal) PullIterator() (next func() (msg, bool), stop func()) {
 func (c *Wal) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	if err := c.log.Close(); err != nil {
 		return errors.Wrap(err, "failed to close log log file")
 	}

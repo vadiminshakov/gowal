@@ -2,13 +2,14 @@ package gowal
 
 import (
 	"cmp"
-	"github.com/stretchr/testify/require"
 	"maps"
 	"os"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestWriteAndGet(t *testing.T) {
@@ -178,7 +179,7 @@ func TestServiceDownUpAndRepairIndex(t *testing.T) {
 	require.NoError(t, err)
 
 	// check
-	for i := range segmentThreshold*2 {
+	for i := range segmentThreshold * 2 {
 		require.Equal(t, "key"+strconv.Itoa(i), log.index[uint64(i)].Key)
 		require.Equal(t, "value"+strconv.Itoa(i), string(log.index[uint64(i)].Value))
 	}
@@ -291,4 +292,103 @@ func TestChecksum_UnsafeRecover(t *testing.T) {
 	require.ElementsMatch(t, []string{"testlogdata/log_4", "testlogdata/log_4.checksum"}, removedFiles)
 
 	require.NoError(t, os.RemoveAll("./testlogdata"))
+}
+func TestWriteTombstone(t *testing.T) {
+	log, err := NewWAL(Config{
+		Dir:              "./testlogdata",
+		Prefix:           "log_",
+		SegmentThreshold: 10,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
+	require.NoError(t, err)
+	defer os.RemoveAll("./testlogdata")
+
+	t.Run("WriteTombstone for non-existent record returns nil", func(t *testing.T) {
+		// try to write tombstone for non-existent record
+		err := log.WriteTombstone(999)
+		require.NoError(t, err)
+
+		// verify record doesn't exist
+		_, _, exists := log.Get(999)
+		require.False(t, exists)
+	})
+
+	t.Run("WriteTombstone for existing record", func(t *testing.T) {
+		// write a record
+		err := log.Write(1, "key1", []byte("value1"))
+		require.NoError(t, err)
+
+		// verify record exists
+		key, value, exists := log.Get(1)
+		require.True(t, exists)
+		require.Equal(t, "key1", key)
+		require.Equal(t, "value1", string(value))
+
+		// write tombstone
+		err = log.WriteTombstone(1)
+		require.NoError(t, err)
+
+		// verify tombstone exists with same key
+		key, value, exists = log.Get(1)
+		require.True(t, exists)
+		require.Equal(t, "key1", key)
+		require.Equal(t, "tombstone", string(value))
+	})
+
+	t.Run("WriteTombstone appears in iterator", func(t *testing.T) {
+		// write some records
+		err := log.Write(3, "key3", []byte("value3"))
+		require.NoError(t, err)
+		err = log.Write(4, "key4", []byte("value4"))
+		require.NoError(t, err)
+
+		// write tombstone for one of them
+		err = log.WriteTombstone(3)
+		require.NoError(t, err)
+
+		// check iterator contains tombstone
+		found := false
+		for msg := range log.Iterator() {
+			if msg.Idx == 3 {
+				require.Equal(t, "key3", msg.Key)
+				require.Equal(t, "tombstone", string(msg.Value))
+				found = true
+			}
+		}
+		require.True(t, found, "Tombstone should appear in iterator")
+	})
+
+	t.Run("WriteTombstone overwrites record from main index", func(t *testing.T) {
+		// simulate having a record in main index by manually adding it
+		// (this simulates the case where record was persisted to main index)
+		log.mu.Lock()
+		log.index[5] = msg{Key: "key5", Value: []byte("value5"), Idx: 5}
+		log.mu.Unlock()
+
+		// verify record exists in main index
+		key, value, exists := log.Get(5)
+		require.True(t, exists)
+		require.Equal(t, "key5", key)
+		require.Equal(t, "value5", string(value))
+
+		// write tombstone
+		err = log.WriteTombstone(5)
+		require.NoError(t, err)
+
+		// verify tombstone overwrites the record
+		key, value, exists = log.Get(5)
+		require.True(t, exists)
+		require.Equal(t, "key5", key)
+		require.Equal(t, "tombstone", string(value))
+
+		// verify record is removed from main index
+		log.mu.RLock()
+		_, existsInMainIndex := log.index[5]
+		_, existsInTmpIndex := log.tmpIndex[5]
+		log.mu.RUnlock()
+
+		require.False(t, existsInMainIndex, "Record should be removed from main index")
+		require.True(t, existsInTmpIndex, "Tombstone should exist in temp index")
+	})
 }
