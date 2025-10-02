@@ -16,20 +16,16 @@ import (
 // removeOldestSegment deletes the oldest segment.
 func (c *Wal) removeOldestSegment() error {
 	oldestSegment := c.oldestSegmentName()
-	
+
 	// load index of the segment we're about to remove to clean up main index
 	oldestSegmentIndex, err := loadIndexFromSegment(oldestSegment)
 	if err != nil {
 		return errors.Wrap(err, "failed to load index of oldest segment")
 	}
-	
-	// remove the segment files
+
+	// remove the segment file
 	if err := os.Remove(oldestSegment); err != nil {
 		return errors.Wrap(err, "failed to remove oldest segment")
-	}
-
-	if err := os.Remove(oldestSegment + checkSumPostfix); err != nil {
-		return errors.Wrap(err, "failed to remove oldest segment checksum file")
 	}
 
 	// remove entries from main index that belonged to the deleted segment
@@ -48,11 +44,6 @@ func (c *Wal) openNewSegment() error {
 		return errors.Wrap(err, "failed to create new log file")
 	}
 
-	checksumFile, err := os.OpenFile(newSegmentName+checkSumPostfix, os.O_RDWR|os.O_CREATE, 0644)
-	if err != nil {
-		return errors.Wrap(err, "failed to create new log file")
-	}
-
 	c.segmentsNumber++
 
 	// transfer tmpIndex to main index when creating new segment
@@ -60,7 +51,6 @@ func (c *Wal) openNewSegment() error {
 	c.tmpIndex = make(map[uint64]msg)
 
 	c.log = logFile
-	c.checksum = checksumFile
 	c.lastOffset = 0
 
 	return nil
@@ -74,11 +64,10 @@ func (c *Wal) oldestSegmentName() string {
 
 // segmentInfoAndIndex loads segment info (file descriptor, name, size, etc) and index from segment files.
 // Works like loadSegment, but for multiple segments.
-func segmentInfoAndIndex(segNumbers []int, path string) (*os.File, *os.File, int64, map[uint64]msg, error) {
+func segmentInfoAndIndex(segNumbers []int, path string) (*os.File, int64, map[uint64]msg, error) {
 	index := make(map[uint64]msg)
 	var (
 		logFileFD      *os.File
-		checksumFd     *os.File
 		lastOffset     int64
 		idxFromSegment map[uint64]msg
 		err            error
@@ -88,18 +77,18 @@ func segmentInfoAndIndex(segNumbers []int, path string) (*os.File, *os.File, int
 			logFileFD.Close()
 		}
 
-		logFileFD, checksumFd, lastOffset, idxFromSegment, err = loadSegment(path + strconv.Itoa(segindex))
+		logFileFD, lastOffset, idxFromSegment, err = loadSegment(path + strconv.Itoa(segindex))
 		if err != nil {
-			return nil, nil, 0, nil, errors.Wrap(err, "failed to load indexes from msg log file")
+			return nil, 0, nil, errors.Wrap(err, "failed to load indexes from msg log file")
 		}
 
 		maps.Copy(index, idxFromSegment)
 	}
 
-	return logFileFD, checksumFd, lastOffset, index, nil
+	return logFileFD, lastOffset, index, nil
 }
 
-// removeCorruptedSegments removes corrupted segments and their checksums.
+// removeCorruptedSegments removes corrupted segments.
 func removeCorruptedSegments(segmentNumbers []int, basePath string) ([]string, error) {
 	var removedFiles []string
 
@@ -110,7 +99,7 @@ func removeCorruptedSegments(segmentNumbers []int, basePath string) ([]string, e
 			return nil, errors.Wrapf(err, "failed to process segment %s", segmentPath)
 		}
 		if removed {
-			removedFiles = append(removedFiles, segmentPath, segmentPath+checkSumPostfix)
+			removedFiles = append(removedFiles, segmentPath)
 		}
 	}
 
@@ -118,44 +107,23 @@ func removeCorruptedSegments(segmentNumbers []int, basePath string) ([]string, e
 }
 
 // loadSegment loads segment info (file descriptor, name, size, etc) and index from segment file.
-func loadSegment(path string) (fd *os.File, checksumFd *os.File, lastOffset int64, index map[uint64]msg, err error) {
+func loadSegment(path string) (fd *os.File, lastOffset int64, index map[uint64]msg, err error) {
 	fd, err = os.OpenFile(path, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
-		return nil, nil, 0, nil, errors.Wrap(err, "failed to open log segment file")
-	}
-
-	chk, err := os.OpenFile(path+checkSumPostfix, os.O_RDWR|os.O_CREATE, 0644)
-	if err != nil {
-		return nil, nil, 0, nil, errors.Wrap(err, "failed to cheksum file")
-	}
-
-	statFd, err := fd.Stat()
-	if err != nil {
-		return nil, nil, 0, nil, err
-	}
-
-	statChk, err := chk.Stat()
-	if err != nil {
-		return nil, nil, 0, nil, err
-	}
-
-	if statFd.Size() != 0 && statChk.Size() != 0 {
-		if err = compareChecksums(fd, chk); err != nil {
-			return nil, nil, 0, nil, errors.Wrap(err, "failed to compare checksums")
-		}
+		return nil, 0, nil, errors.Wrap(err, "failed to open log segment file")
 	}
 
 	lastOffset, err = calculateLastOffset(fd)
 	if err != nil {
-		return nil, nil, 0, nil, errors.Wrap(err, "failed to calculate last offset")
+		return nil, 0, nil, errors.Wrap(err, "failed to calculate last offset")
 	}
 
 	index, err = loadIndexes(fd)
 	if err != nil {
-		return nil, nil, 0, nil, errors.Wrap(err, "failed to build index from log segment")
+		return nil, 0, nil, errors.Wrap(err, "failed to build index from log segment")
 	}
 
-	return fd, chk, lastOffset, index, nil
+	return fd, lastOffset, index, nil
 }
 
 func calculateLastOffset(fd *os.File) (int64, error) {
@@ -171,44 +139,32 @@ func calculateLastOffset(fd *os.File) (int64, error) {
 	return fileInfo.Size() + 1, nil
 }
 
-// handleCorruptedSegment checks the checksum and removes the segment and checksum files if corrupted.
+// handleCorruptedSegment checks segment for corruption and removes if corrupted.
 func handleCorruptedSegment(segmentPath string) (bool, error) {
-	file, err := os.OpenFile(segmentPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+	file, err := os.OpenFile(segmentPath, os.O_RDONLY, 0644)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to open segment file")
 	}
 	defer file.Close()
-
-	checksumFile, err := os.OpenFile(segmentPath+checkSumPostfix, os.O_RDWR|os.O_CREATE, 0644)
-	if err != nil {
-		return false, errors.Wrap(err, "failed to open checksum file")
-	}
-	defer checksumFile.Close()
 
 	statFd, err := file.Stat()
 	if err != nil {
 		return false, err
 	}
 
-	statChk, err := checksumFile.Stat()
-	if err != nil {
-		return false, err
-	}
-
-	if statFd.Size() == 0 && statChk.Size() == 0 {
+	if statFd.Size() == 0 {
 		return true, nil
 	}
 
-	if err := compareChecksums(file, checksumFile); err == nil {
-		return false, nil // Checksums match; no need to erase.
+	// try to load indexes - this will verify checksums
+	_, err = loadIndexes(file)
+	if err == nil {
+		return false, nil // No corruption detected
 	}
 
+	// Corruption detected, remove segment
 	if err := os.Remove(segmentPath); err != nil {
 		return false, errors.Wrap(err, "failed to remove corrupted segment")
-	}
-
-	if err := os.Remove(segmentPath + checkSumPostfix); err != nil {
-		return false, errors.Wrap(err, "failed to remove corrupted checksum file")
 	}
 
 	return true, nil
@@ -230,10 +186,6 @@ func findSegmentNumber(dir string, prefix string) (segmentsNumbers []int, err er
 	segmentsNumbers = make([]int, 0)
 	for _, d := range de {
 		if d.IsDir() {
-			continue
-		}
-
-		if strings.HasSuffix(d.Name(), checkSumPostfix) {
 			continue
 		}
 
@@ -273,6 +225,12 @@ func loadIndexes(file *os.File) (map[uint64]msg, error) {
 			}
 			return nil, errors.Wrap(err, "failed to decode indexed msg from log")
 		}
+
+		// verify checksum for each loaded message
+		if err := msgIndexed.verifyChecksum(); err != nil {
+			return nil, errors.Wrapf(err, "corrupted message at index %d", msgIndexed.Idx)
+		}
+
 		index[msgIndexed.Idx] = msgIndexed
 	}
 
