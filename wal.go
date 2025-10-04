@@ -139,8 +139,8 @@ func (c *Wal) Get(index uint64) (string, []byte, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	// check main index first
-	msg, ok := c.index[index]
+	// check temporary index first (smaller, more likely to contain recent data)
+	msg, ok := c.tmpIndex[index]
 	if ok {
 		// verify checksum on read
 		if err := msg.verifyChecksum(); err != nil {
@@ -149,8 +149,8 @@ func (c *Wal) Get(index uint64) (string, []byte, error) {
 		return msg.Key, msg.Value, nil
 	}
 
-	// check temporary index for current segment
-	msg, ok = c.tmpIndex[index]
+	// check main index for historical segments
+	msg, ok = c.index[index]
 	if ok {
 		// verify checksum on read
 		if err := msg.verifyChecksum(); err != nil {
