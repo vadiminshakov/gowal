@@ -8,14 +8,6 @@ GoWAL is a simple, efficient **Write-Ahead Log (WAL)** library written in Go.
 It allows you to store data in an append-only log structure, which is useful for applications that require crash recovery, transaction logging, or high-availability systems. 
 GoWAL is optimized for performance with configurable segment rotation and in-memory indexing.
 
-## Features
-
-- **Append-only log structure**: Ensures that data is only appended and never modified or deleted, which is crucial for durability and integrity.
-- **Segmented logs**: Automatically rotates segments after a configurable threshold is reached. Older segments are deleted to save disk space.
-- **Efficient lookups**: In-memory index allows for quick lookups of log entries by their index.
-- **Persistence**: Logs and their indexes are stored on disk and reloaded into memory upon initialization.
-- **Configurable sync mode**: Option to sync logs to disk after every write to ensure data durability, though at the cost of speed.
-- **Checksums**: Each log segment has an associated checksum file to ensure data integrity.
 
 ## Installation
 
@@ -107,6 +99,42 @@ The behavior of the WAL can be configured using several configuration options (`
  - `SegmentThreshold`: Maximum number of log entries per segment before rotation occurs. Default is 1000.
  - `MaxSegments`: Maximum number of segments to keep before the oldest segments are deleted. Default is 5.
  - `IsInSyncDiskMode`: When set to true, every write is synced to disk, ensuring durability at the cost of performance. Default is false.
+
+## Architecture
+
+GoWAL uses a segmented architecture with two-level indexing for efficient write and read operations:
+
+### Segments
+Data is split into numbered files (`segment_0`, `segment_1`, etc.). Each record contains:
+- Index, Key, Value
+- CRC32 checksum for integrity verification
+
+### Two-Level Indexing
+- **tmpIndex**: In-memory index for the current active segment. Maps record index to its position in the segment.
+- **index**: Main in-memory index for all persisted (closed) segments. Provides fast lookups across historical data.
+
+### Write Flow
+1. Check if index already exists (prevents duplicates)
+2. Check if rotation is needed based on `SegmentThreshold`
+3. Calculate CRC32 checksum for the record
+4. Serialize record (with checksum) using MessagePack
+5. Write to current segment file
+6. Add entry to `tmpIndex`
+
+### Rotation & Segment Management
+When `tmpIndex` size exceeds `SegmentThreshold`:
+1. Current segment is closed
+2. `tmpIndex` is merged into main `index`
+3. `tmpIndex` is cleared
+4. New segment is created
+
+When `MaxSegments` limit is reached, the oldest segment is automatically deleted along with its index entries to manage disk space.
+
+### Read Operations
+Lookups check both indexes:
+1. Check main `index` first (historical segments)
+2. If not found, check `tmpIndex` (current segment)
+3. Verify checksum before returning data
 
 ### Contributing
 Feel free to open issues or submit pull requests for improvements and bug fixes. We welcome contributions!
