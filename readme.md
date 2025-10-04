@@ -38,7 +38,7 @@ cfg := gowal.Config{
     SegmentThreshold: 1000,
     MaxSegments:      100,
     IsInSyncDiskMode: false,
-})
+}
 
 wal, err := gowal.NewWAL(cfg)
 if err != nil {
@@ -62,9 +62,9 @@ If the entry with the same index already exists, the function will return an err
 You can retrieve a log entry by its index:
 
 ```go
-key, value, found := wal.Get(1)
-if !found {
-    log.Println("Entry not found")
+key, value, err := wal.Get(1)
+if err != nil {
+    log.Println("Entry not found or error:", err)
 } else {
     log.Printf("Key: %s, Value: %s", key, string(value))
 }
@@ -72,11 +72,10 @@ if !found {
 
 ### Iterating over log entries
 
-You can iterate over all log entries using the `Iterate` function:
+You can iterate over all log entries using the `Iterator` function:
 
 ```go
-iter := wal.Iterator()
-for msg, ok := iter() ; ok; msg, ok = iter() {
+for msg := range wal.Iterator() {
     log.Printf("Key: %s, Value: %s\n", msg.Key, string(msg.Value))
 }
 ```
@@ -95,7 +94,11 @@ if err != nil {
 If the WAL is corrupted, you can recover it by calling the `UnsafeRecover` function:
 
 ```go
-removedFiles, err := wal.UnsafeRecover("./wal", "segment_")
+removedFiles, err := gowal.UnsafeRecover("./log", "segment_")
+if err != nil {
+    log.Fatal(err)
+}
+log.Printf("Removed corrupted files: %v", removedFiles)
 ```
 
 ### Configuration
