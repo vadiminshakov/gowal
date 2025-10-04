@@ -29,9 +29,6 @@ type Wal struct {
 	// append-only log with proposed messages that node consumed
 	log *os.File
 
-	// file with checksum for current segment
-	checksum *os.File
-
 	// index that matches height of msg record with offset in file
 	index    map[uint64]msg
 	tmpIndex map[uint64]msg
@@ -96,7 +93,7 @@ func NewWAL(config Config) (*Wal, error) {
 	}
 
 	// load segments into mem
-	fd, chk, lastOffset, index, err := segmentInfoAndIndex(segmentsNumbers, path.Join(config.Dir, config.Prefix))
+	fd, lastOffset, index, err := segmentInfoAndIndex(segmentsNumbers, path.Join(config.Dir, config.Prefix))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load log segments")
 	}
@@ -108,7 +105,7 @@ func NewWAL(config Config) (*Wal, error) {
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
 
-	w := &Wal{log: fd, index: index, checksum: chk, tmpIndex: make(map[uint64]msg),
+	w := &Wal{log: fd, index: index, tmpIndex: make(map[uint64]msg),
 		buf: &buf, enc: enc, lastOffset: lastOffset, pathToLogsDir: config.Dir,
 		segmentsNumber: numberOfSegments, prefix: config.Prefix, segmentsThreshold: config.SegmentThreshold,
 		maxSegments: config.MaxSegments, isInSyncDiskMode: config.IsInSyncDiskMode}
@@ -138,23 +135,31 @@ func UnsafeRecover(dir, segmentPrefix string) ([]string, error) {
 }
 
 // Get queries value at specific index in the log.
-func (c *Wal) Get(index uint64) (string, []byte, bool) {
+func (c *Wal) Get(index uint64) (string, []byte, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	// check main index first
 	msg, ok := c.index[index]
 	if ok {
-		return msg.Key, msg.Value, true
+		// verify checksum on read
+		if err := msg.verifyChecksum(); err != nil {
+			return "", nil, err
+		}
+		return msg.Key, msg.Value, nil
 	}
 
 	// check temporary index for current segment
 	msg, ok = c.tmpIndex[index]
 	if ok {
-		return msg.Key, msg.Value, true
+		// verify checksum on read
+		if err := msg.verifyChecksum(); err != nil {
+			return "", nil, err
+		}
+		return msg.Key, msg.Value, nil
 	}
 
-	return "", nil, false
+	return "", nil, nil
 }
 
 // CurrentIndex returns current index of the log.
@@ -175,7 +180,10 @@ func (c *Wal) Write(index uint64, key string, value []byte) error {
 		return err
 	}
 
-	data, err := msgpack.Marshal(msg{Key: key, Value: value, Idx: index})
+	m := msg{Key: key, Value: value, Idx: index}
+	m.Checksum = m.calculateChecksum()
+
+	data, err := msgpack.Marshal(m)
 	if err != nil {
 		return errors.Wrap(err, "failed to encode msg")
 	}
@@ -184,23 +192,15 @@ func (c *Wal) Write(index uint64, key string, value []byte) error {
 		return errors.Wrap(err, "failed to write msg to log")
 	}
 
-	if err := writeChecksum(c.log, c.checksum); err != nil {
-		return errors.Wrap(err, "failed to write checksum")
-	}
-
 	if c.isInSyncDiskMode {
 		if err := c.log.Sync(); err != nil {
 			return errors.Wrap(err, "failed to sync log")
 		}
-		if err := c.checksum.Sync(); err != nil {
-			return errors.Wrap(err, "failed to checksum")
-		}
 	}
 
-	c.lastOffset += int64(c.buf.Len())
+	c.lastOffset += int64(len(data))
 	c.lastIndex.Add(1)
-	c.buf.Reset()
-	c.tmpIndex[index] = msg{Key: key, Value: value, Idx: index}
+	c.tmpIndex[index] = m
 
 	return nil
 }
@@ -235,6 +235,8 @@ func (c *Wal) WriteTombstone(index uint64) error {
 
 	// create tombstone with existing key
 	tombstone := msg{Key: existingMsg.Key, Value: []byte("tombstone"), Idx: index}
+	tombstone.Checksum = tombstone.calculateChecksum()
+
 	data, err := msgpack.Marshal(tombstone)
 	if err != nil {
 		return errors.Wrap(err, "failed to encode tombstone")
@@ -244,16 +246,9 @@ func (c *Wal) WriteTombstone(index uint64) error {
 		return errors.Wrap(err, "failed to write tombstone to log")
 	}
 
-	if err := writeChecksum(c.log, c.checksum); err != nil {
-		return errors.Wrap(err, "failed to write checksum")
-	}
-
 	if c.isInSyncDiskMode {
 		if err := c.log.Sync(); err != nil {
 			return errors.Wrap(err, "failed to sync log")
-		}
-		if err := c.checksum.Sync(); err != nil {
-			return errors.Wrap(err, "failed to sync checksum")
 		}
 	}
 
@@ -328,17 +323,13 @@ func (c *Wal) PullIterator() (next func() (msg, bool), stop func()) {
 	return iter.Pull(c.Iterator())
 }
 
-// Close closes log and checksum files.
+// Close closes log file.
 func (c *Wal) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if err := c.log.Close(); err != nil {
-		return errors.Wrap(err, "failed to close log log file")
-	}
-
-	if err := c.checksum.Close(); err != nil {
-		return errors.Wrap(err, "failed to close checksum file")
+		return errors.Wrap(err, "failed to close log file")
 	}
 
 	return nil

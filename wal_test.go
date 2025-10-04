@@ -6,7 +6,6 @@ import (
 	"os"
 	"slices"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,8 +26,8 @@ func TestWriteAndGet(t *testing.T) {
 	}
 
 	for i := 0; i < 10; i++ {
-		key, value, ok := log.Get(uint64(i))
-		require.True(t, ok)
+		key, value, err := log.Get(uint64(i))
+		require.NoError(t, err)
 		require.Equal(t, "key"+strconv.Itoa(i), key)
 		require.Equal(t, "value"+strconv.Itoa(i), string(value))
 	}
@@ -201,7 +200,13 @@ func TestChecksum(t *testing.T) {
 		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
 	}
 
-	require.NoError(t, compareChecksums(log.log, log.checksum))
+	// verify data can be read correctly (checksums verified on read)
+	for i := 0; i < 2; i++ {
+		key, value, err := log.Get(uint64(i))
+		require.NoError(t, err)
+		require.Equal(t, "key"+strconv.Itoa(i), key)
+		require.Equal(t, []byte("value"+strconv.Itoa(i)), value)
+	}
 
 	require.NoError(t, os.RemoveAll("./testlogdata"))
 }
@@ -220,15 +225,29 @@ func TestChecksum_Corrupted(t *testing.T) {
 		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
 	}
 
-	// corrupt the data by writing some garbage to the segment file
-	log.log.Write([]byte("corrupted data"))
+	// close and re-open to test corruption detection
+	log.Close()
 
-	require.Error(t, compareChecksums(log.log, log.checksum))
+	// corrupt the data by writing some garbage to the segment file
+	f, err := os.OpenFile("./testlogdata/log_0", os.O_APPEND|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	f.Write([]byte("corrupted data"))
+	f.Close()
+
+	// try to reload - should fail due to checksum mismatch
+	_, err = NewWAL(Config{
+		Dir:              "./testlogdata",
+		Prefix:           "log_",
+		SegmentThreshold: 10,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
+	require.Error(t, err)
 
 	require.NoError(t, os.RemoveAll("./testlogdata"))
 }
 
-func TestChecksum_Check_Checksum_Files(t *testing.T) {
+func TestChecksum_Check_Segment_Files(t *testing.T) {
 	log, err := NewWAL(Config{
 		Dir:              "./testlogdata",
 		Prefix:           "log_",
@@ -240,28 +259,29 @@ func TestChecksum_Check_Checksum_Files(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
-
-		require.NoError(t, compareChecksums(log.log, log.checksum))
 	}
 
-	// find all checksum files
-	checksumFiles, err := os.ReadDir("./testlogdata")
+	// verify all data can be read correctly (checksums verified on read)
+	for i := 0; i < 5; i++ {
+		key, value, err := log.Get(uint64(i))
+		require.NoError(t, err)
+		require.Equal(t, "key"+strconv.Itoa(i), key)
+		require.Equal(t, []byte("value"+strconv.Itoa(i)), value)
+	}
+
+	// find all segment files (no more separate checksum files)
+	files, err := os.ReadDir("./testlogdata")
 	require.NoError(t, err)
 
-	countOfChecksums := 0
-	for _, f := range checksumFiles {
+	countOfSegments := 0
+	for _, f := range files {
 		if f.IsDir() {
 			continue
 		}
-
-		if strings.Contains(f.Name(), "checksum") {
-			continue
-		}
-
-		countOfChecksums++
+		countOfSegments++
 	}
 
-	require.Equal(t, countOfChecksums, 5)
+	require.Equal(t, 5, countOfSegments)
 
 	require.NoError(t, os.RemoveAll("./testlogdata"))
 }
@@ -280,16 +300,18 @@ func TestChecksum_UnsafeRecover(t *testing.T) {
 		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
 	}
 
-	// corrupt the data by writing some garbage to the segment file
-	log.log.Write([]byte("corrupted data"))
+	// close and corrupt the data by writing some garbage to the segment file
+	log.Close()
+	f, err := os.OpenFile("./testlogdata/log_4", os.O_APPEND|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	f.Write([]byte("corrupted data"))
+	f.Close()
 
-	require.Error(t, compareChecksums(log.log, log.checksum))
-
-	// recover
+	// recover - should remove corrupted segment
 	removedFiles, err := UnsafeRecover("./testlogdata", "log_")
 	require.NoError(t, err)
-	require.Equal(t, 2, len(removedFiles))
-	require.ElementsMatch(t, []string{"testlogdata/log_4", "testlogdata/log_4.checksum"}, removedFiles)
+	require.Equal(t, 1, len(removedFiles))
+	require.ElementsMatch(t, []string{"testlogdata/log_4"}, removedFiles)
 
 	require.NoError(t, os.RemoveAll("./testlogdata"))
 }
@@ -310,8 +332,10 @@ func TestWriteTombstone(t *testing.T) {
 		require.NoError(t, err)
 
 		// verify record doesn't exist
-		_, _, exists := log.Get(999)
-		require.False(t, exists)
+		key, value, err := log.Get(999)
+		require.NoError(t, err)
+		require.Equal(t, "", key)
+		require.Nil(t, value)
 	})
 
 	t.Run("WriteTombstone for existing record", func(t *testing.T) {
@@ -320,8 +344,8 @@ func TestWriteTombstone(t *testing.T) {
 		require.NoError(t, err)
 
 		// verify record exists
-		key, value, exists := log.Get(1)
-		require.True(t, exists)
+		key, value, err := log.Get(1)
+		require.NoError(t, err)
 		require.Equal(t, "key1", key)
 		require.Equal(t, "value1", string(value))
 
@@ -330,8 +354,8 @@ func TestWriteTombstone(t *testing.T) {
 		require.NoError(t, err)
 
 		// verify tombstone exists with same key
-		key, value, exists = log.Get(1)
-		require.True(t, exists)
+		key, value, err = log.Get(1)
+		require.NoError(t, err)
 		require.Equal(t, "key1", key)
 		require.Equal(t, "tombstone", string(value))
 	})
@@ -362,13 +386,15 @@ func TestWriteTombstone(t *testing.T) {
 	t.Run("WriteTombstone overwrites record from main index", func(t *testing.T) {
 		// simulate having a record in main index by manually adding it
 		// (this simulates the case where record was persisted to main index)
+		m := msg{Key: "key5", Value: []byte("value5"), Idx: 5}
+		m.Checksum = m.calculateChecksum()
 		log.mu.Lock()
-		log.index[5] = msg{Key: "key5", Value: []byte("value5"), Idx: 5}
+		log.index[5] = m
 		log.mu.Unlock()
 
 		// verify record exists in main index
-		key, value, exists := log.Get(5)
-		require.True(t, exists)
+		key, value, err := log.Get(5)
+		require.NoError(t, err)
 		require.Equal(t, "key5", key)
 		require.Equal(t, "value5", string(value))
 
@@ -377,8 +403,8 @@ func TestWriteTombstone(t *testing.T) {
 		require.NoError(t, err)
 
 		// verify tombstone overwrites the record
-		key, value, exists = log.Get(5)
-		require.True(t, exists)
+		key, value, err = log.Get(5)
+		require.NoError(t, err)
 		require.Equal(t, "key5", key)
 		require.Equal(t, "tombstone", string(value))
 
