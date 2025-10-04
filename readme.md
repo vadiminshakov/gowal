@@ -104,16 +104,16 @@ The behavior of the WAL can be configured using several configuration options (`
 
 GoWAL uses a segmented architecture with two-level indexing for efficient write and read operations:
 
-### Segments
+#### Segments
 Data is split into numbered files (`segment_0`, `segment_1`, etc.). Each record contains:
 - Index, Key, Value
 - CRC32 checksum for integrity verification
 
-### Two-Level Indexing
+#### Two-Level Indexing
 - **tmpIndex**: In-memory index for the current active segment. Maps record index to its position in the segment.
 - **index**: Main in-memory index for all persisted (closed) segments. Provides fast lookups across historical data.
 
-### Write Flow
+#### Write Flow
 1. Check if index already exists (prevents duplicates)
 2. Check if rotation is needed based on `SegmentThreshold`
 3. Calculate CRC32 checksum for the record
@@ -121,7 +121,7 @@ Data is split into numbered files (`segment_0`, `segment_1`, etc.). Each record 
 5. Write to current segment file
 6. Add entry to `tmpIndex`
 
-### Rotation & Segment Management
+#### Rotation & Segment Management
 When `tmpIndex` size exceeds `SegmentThreshold`:
 1. Current segment is closed
 2. `tmpIndex` is merged into main `index`
@@ -130,10 +130,10 @@ When `tmpIndex` size exceeds `SegmentThreshold`:
 
 When `MaxSegments` limit is reached, the oldest segment is automatically deleted along with its index entries to manage disk space.
 
-### Read Operations
+#### Read Operations
 Lookups check both indexes:
-1. Check main `index` first (historical segments)
-2. If not found, check `tmpIndex` (current segment)
+1. Check `tmpIndex` first (current segment, smaller and more likely to contain recent data)
+2. If not found, check main `index` (historical segments)
 3. Verify checksum before returning data
 
 ### Contributing
