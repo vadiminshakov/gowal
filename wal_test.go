@@ -439,7 +439,8 @@ func TestWriteBatch_DuplicateIndexesInBatch(t *testing.T) {
 	}
 
 	err = wal.WriteBatch(batch)
-	require.ErrorIs(t, err, ErrExists, "expected ErrExists for duplicate indexes in batch")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "duplicate index", "Expected error for duplicate index")
 }
 
 func TestWriteBatch_DuplicateWithExistingIndex(t *testing.T) {

@@ -37,6 +37,9 @@ type Wal struct {
 	// gob encoder for proposed messages
 	enc *gob.Encoder
 
+	// msgpack encoder for proposed messages
+	msgpackEnc *msgpack.Encoder
+
 	// buffer for proposed messages
 	buf *bytes.Buffer
 
@@ -115,9 +118,10 @@ func NewWAL(config Config) (*Wal, error) {
 
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
+	msgpackEnc := msgpack.NewEncoder(&buf)
 
 	w := &Wal{log: fd, index: index, tmpIndex: make(map[uint64]msg),
-		buf: &buf, enc: enc, lastOffset: lastOffset, pathToLogsDir: config.Dir,
+		buf: &buf, enc: enc, msgpackEnc: msgpackEnc, lastOffset: lastOffset, pathToLogsDir: config.Dir,
 		segmentsNumber: numberOfSegments, prefix: config.Prefix, segmentsThreshold: config.SegmentThreshold,
 		maxSegments: config.MaxSegments, isInSyncDiskMode: config.IsInSyncDiskMode}
 
@@ -205,16 +209,17 @@ func (c *Wal) WriteBatch(batch []Record) error {
 		}
 	}
 
-	var buf bytes.Buffer
+	c.buf.Reset()
+	messages := make([]msg, 0, c.segmentsThreshold)
+	c.buf.Grow(len(batch) * 128) // small heuristic; avoids repeated growth on small/medium batches
 	nextRotateAfter := c.segmentsThreshold - len(c.tmpIndex)
-	messages := make([]msg, 0, nextRotateAfter)
 
 	flush := func() error {
-		if buf.Len() == 0 {
+		if c.buf.Len() == 0 {
 			return nil
 		}
 
-		if _, err := c.log.Write(buf.Bytes()); err != nil {
+		if _, err := c.log.Write(c.buf.Bytes()); err != nil {
 			return errors.Wrap(err, "failed to write msg to log")
 		}
 		if c.isInSyncDiskMode {
@@ -227,10 +232,10 @@ func (c *Wal) WriteBatch(batch []Record) error {
 			c.tmpIndex[m.Idx] = m
 		}
 
-		c.lastOffset += int64(buf.Len())
+		c.lastOffset += int64(c.buf.Len())
 		c.lastIndex.Add(uint64(len(messages)))
 
-		buf.Reset()
+		c.buf.Reset()
 		messages = messages[:0]
 		return nil
 	}
@@ -239,12 +244,10 @@ func (c *Wal) WriteBatch(batch []Record) error {
 		m := msg{Key: record.Key, Value: record.Value, Idx: record.Index}
 		m.Checksum = m.calculateChecksum()
 
-		data, err := msgpack.Marshal(m)
-		if err != nil {
+		if err := c.msgpackEnc.Encode(m); err != nil {
 			return errors.Wrap(err, "failed to encode msg")
 		}
 
-		buf.Write(data)
 		messages = append(messages, m)
 		nextRotateAfter--
 
