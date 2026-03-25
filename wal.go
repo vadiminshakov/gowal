@@ -178,6 +178,10 @@ func (c *Wal) CurrentIndex() uint64 {
 }
 
 func (c *Wal) WriteBatch(batch []Record) error {
+	if len(batch) == 0 {
+		return nil
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	buf := bytes.NewBuffer(nil)
