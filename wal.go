@@ -184,36 +184,70 @@ func (c *Wal) WriteBatch(batch []Record) error {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	buf := bytes.NewBuffer(nil)
 
 	for _, record := range batch {
 		if _, exists := c.index[record.Index]; exists {
 			return ErrExists
 		}
-		if err := c.rotateIfNeeded(); err != nil {
-			return err
+	}
+
+	buf := bytes.NewBuffer(nil)
+	nextRotateAfter := c.segmentsThreshold - len(c.tmpIndex)
+	messages := make([]msg, 0, nextRotateAfter)
+
+	flush := func() error {
+		if buf.Len() == 0 {
+			return nil
 		}
+
+		if _, err := c.log.Write(buf.Bytes()); err != nil {
+			return errors.Wrap(err, "failed to write msg to log")
+		}
+		if c.isInSyncDiskMode {
+			if err := c.log.Sync(); err != nil {
+				return errors.Wrap(err, "failed to sync log")
+			}
+		}
+
+		for _, m := range messages {
+			c.tmpIndex[m.Idx] = m
+		}
+
+		c.lastOffset += int64(buf.Len())
+		c.lastIndex.Add(uint64(len(messages)))
+
+		buf.Reset()
+		messages = messages[:0]
+		return nil
+	}
+
+	for _, record := range batch {
 		m := msg{Key: record.Key, Value: record.Value, Idx: record.Index}
 		m.Checksum = m.calculateChecksum()
+
 		data, err := msgpack.Marshal(m)
 		if err != nil {
 			return errors.Wrap(err, "failed to encode msg")
 		}
-		buf.Write(data)
-		c.tmpIndex[record.Index] = m
-	}
 
-	if _, err := c.log.Write(buf.Bytes()); err != nil {
-		return errors.Wrap(err, "failed to write msg to log")
-	}
-	if c.isInSyncDiskMode {
-		if err := c.log.Sync(); err != nil {
-			return errors.Wrap(err, "failed to sync log")
+		buf.Write(data)
+		messages = append(messages, m)
+		nextRotateAfter--
+
+		if nextRotateAfter == 0 {
+			if err := flush(); err != nil {
+				return err
+			}
+			if err := c.rotateIfNeeded(); err != nil {
+				return err
+			}
+			nextRotateAfter = c.segmentsThreshold
 		}
 	}
-	c.lastOffset += int64(buf.Len())
-	c.lastIndex.Add(uint64(len(batch)))
 
+	if err := flush(); err != nil {
+		return err
+	}
 	return nil
 }
 
