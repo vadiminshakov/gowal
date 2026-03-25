@@ -448,7 +448,6 @@ func benchmarkWALWrite(b *testing.B, batchSize int) {
 	defer func() {
 		require.NoError(b, log.Close())
 	}()
-	require.NoError(b, err)
 
 	valueData := getRandomData(1024)
 
