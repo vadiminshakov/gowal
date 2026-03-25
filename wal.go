@@ -3,6 +3,7 @@ package gowal
 import (
 	"bytes"
 	"encoding/gob"
+	"fmt"
 	"iter"
 	"os"
 	"path"
@@ -182,11 +183,23 @@ func (c *Wal) WriteBatch(batch []Record) error {
 		return nil
 	}
 
+	// check if indexes are unique
+	indexes := make(map[uint64]struct{}, len(batch))
+	for _, record := range batch {
+		if _, exists := indexes[record.Index]; exists {
+			return fmt.Errorf("duplicate index %d ", record.Index)
+		}
+		indexes[record.Index] = struct{}{}
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	for _, record := range batch {
 		if _, exists := c.index[record.Index]; exists {
+			return ErrExists
+		}
+		if _, exists := c.tmpIndex[record.Index]; exists {
 			return ErrExists
 		}
 	}

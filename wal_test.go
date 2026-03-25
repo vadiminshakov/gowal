@@ -2,6 +2,7 @@ package gowal
 
 import (
 	"cmp"
+	"fmt"
 	"maps"
 	"math/rand"
 	"os"
@@ -421,6 +422,87 @@ func TestWriteTombstone(t *testing.T) {
 	})
 }
 
+func TestWriteBatch_DuplicateIndexesInBatch(t *testing.T) {
+	dir := t.TempDir()
+	wal, err := NewWAL(Config{
+		Dir:              dir,
+		Prefix:           "log_",
+		SegmentThreshold: 10,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
+	require.NoError(t, err)
+
+	batch := []Record{
+		{Index: 1, Key: "key1", Value: []byte("v1")},
+		{Index: 1, Key: "key1-dup", Value: []byte("v1-dup")},
+	}
+
+	err = wal.WriteBatch(batch)
+	require.ErrorIs(t, err, ErrExists, "expected ErrExists for duplicate indexes in batch")
+}
+
+func TestWriteBatch_DuplicateWithExistingIndex(t *testing.T) {
+	dir := t.TempDir()
+	wal, err := NewWAL(Config{
+		Dir:              dir,
+		Prefix:           "log_",
+		SegmentThreshold: 10,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
+	require.NoError(t, err)
+
+	// Write a single entry first
+	require.NoError(t, wal.Write(5, "initial", []byte("value")))
+
+	batch := []Record{
+		{Index: 5, Key: "key5-conflict", Value: []byte("valueB")},
+		{Index: 6, Key: "key6", Value: []byte("value6")},
+	}
+
+	err = wal.WriteBatch(batch)
+	require.ErrorIs(t, err, ErrExists, "expected ErrExists for index conflict with existing WAL entry")
+}
+
+func TestWriteBatch_AcrossSegmentThreshold(t *testing.T) {
+	dir := t.TempDir()
+	segmentThreshold := 3
+
+	wal, err := NewWAL(Config{
+		Dir:              dir,
+		Prefix:           "log_",
+		SegmentThreshold: segmentThreshold,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
+	require.NoError(t, err)
+	defer wal.Close()
+
+	// Build a batch exactly at threshold boundary
+	batch := make([]Record, segmentThreshold+1)
+	for i := 0; i < len(batch); i++ {
+		batch[i] = Record{
+			Index: uint64(i + 1),
+			Key:   fmt.Sprintf("key%d", i+1),
+			Value: []byte(fmt.Sprintf("value%d", i+1)),
+		}
+	}
+
+	require.NoError(t, wal.WriteBatch(batch))
+
+	// All records should be queryable via Get
+	for _, r := range batch {
+		key, value, err := wal.Get(r.Index)
+		require.NoError(t, err, "expected record to exist after batch write and rotation")
+		require.Equal(t, r.Key, key)
+		require.Equal(t, r.Value, value)
+	}
+
+	// CurrentIndex should reflect the highest index
+	require.Equal(t, uint64(len(batch)), wal.CurrentIndex())
+}
+
 // getRandomData returns a random byte slice of the given size.
 func getRandomData(sizeBytes int) []byte {
 	if sizeBytes <= 0 {
@@ -448,7 +530,6 @@ func benchmarkWALWrite(b *testing.B, batchSize int) {
 	defer func() {
 		require.NoError(b, log.Close())
 	}()
-	require.NoError(b, err)
 
 	valueData := getRandomData(1024)
 
