@@ -178,6 +178,7 @@ func (c *Wal) CurrentIndex() uint64 {
 	return c.lastIndex.Load()
 }
 
+// WriteBatch appends a batch of records to the WAL in a single operation.
 func (c *Wal) WriteBatch(batch []Record) error {
 	if len(batch) == 0 {
 		return nil
