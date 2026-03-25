@@ -571,10 +571,9 @@ func BenchmarkWal_WriteBatch100(b *testing.B)   { benchmarkWALWrite(b, 100) }
 func BenchmarkWal_WriteBatch1000(b *testing.B)  { benchmarkWALWrite(b, 1000) }
 func BenchmarkWal_WriteBatch10000(b *testing.B) { benchmarkWALWrite(b, 10000) }
 
-// Batching significantly improves WAL write throughput (~10–26x, from ~48k to ~1.3M records/s)
-// by amortizing per-operation overhead.
-// Most of the gains are achieved with batch sizes of 100–1000;
-// larger batches provide diminishing returns while substantially increasing memory usage and allocations.
+// Batching significantly improves WAL write throughput (~2–6x, from ~210k to ~1.25M records/s)
+// by amortizing per-operation overhead. Most of the gains are achieved with batch sizes of 100–1000;
+// larger batches (e.g., 10k) provide only marginal improvements while greatly increasing memory usage and allocations.
 //
-// Per-record allocations remain roughly constant (~6–7 allocs, ~1.6–2.0KB),
+// Per-record allocations remain roughly constant (~6–7 allocs, ~1.7–2.0KB),
 // indicating that batching reduces syscall/overhead cost but does not optimize per-record memory behavior.

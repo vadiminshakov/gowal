@@ -267,7 +267,40 @@ func (c *Wal) WriteBatch(batch []Record) error {
 
 // Write writes key-value pair to the log.
 func (c *Wal) Write(index uint64, key string, value []byte) error {
-	return c.WriteBatch([]Record{{Index: index, Key: key, Value: value}})
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if _, exists := c.index[index]; exists {
+		return ErrExists
+	}
+
+	if err := c.rotateIfNeeded(); err != nil {
+		return err
+	}
+
+	m := msg{Key: key, Value: value, Idx: index}
+	m.Checksum = m.calculateChecksum()
+
+	data, err := msgpack.Marshal(m)
+	if err != nil {
+		return errors.Wrap(err, "failed to encode msg")
+	}
+
+	if _, err := c.log.Write(data); err != nil {
+		return errors.Wrap(err, "failed to write msg to log")
+	}
+
+	if c.isInSyncDiskMode {
+		if err := c.log.Sync(); err != nil {
+			return errors.Wrap(err, "failed to sync log")
+		}
+	}
+
+	c.lastOffset += int64(len(data))
+	c.lastIndex.Add(1)
+	c.tmpIndex[index] = m
+
+	return nil
 }
 
 // WriteTombstone writes a tombstone record for the given index.
