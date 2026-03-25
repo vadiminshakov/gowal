@@ -191,7 +191,7 @@ func (c *Wal) WriteBatch(batch []Record) error {
 		}
 	}
 
-	buf := bytes.NewBuffer(nil)
+	var buf bytes.Buffer
 	nextRotateAfter := c.segmentsThreshold - len(c.tmpIndex)
 	messages := make([]msg, 0, nextRotateAfter)
 

@@ -423,12 +423,15 @@ func TestWriteTombstone(t *testing.T) {
 
 // getRandomData returns a random byte slice of the given size.
 func getRandomData(sizeBytes int) []byte {
-	var letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-	b := make([]rune, sizeBytes/4)
+	if sizeBytes <= 0 {
+		return nil
+	}
+	letters := []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	b := make([]byte, sizeBytes)
 	for i := range b {
 		b[i] = letters[rand.Intn(len(letters))]
 	}
-	return []byte(string(b))
+	return b
 }
 
 func benchmarkWALWrite(b *testing.B, batchSize int) {
@@ -441,6 +444,10 @@ func benchmarkWALWrite(b *testing.B, batchSize int) {
 		MaxSegments:      10000000,
 		IsInSyncDiskMode: false,
 	})
+	require.NoError(b, err)
+	defer func() {
+		require.NoError(b, log.Close())
+	}()
 	require.NoError(b, err)
 
 	valueData := getRandomData(1024)
