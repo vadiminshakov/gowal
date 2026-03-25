@@ -81,6 +81,16 @@ type Config struct {
 	IsInSyncDiskMode bool
 }
 
+// Record is a struct that represents a record in the log.
+type Record struct {
+	// Index is the unique index of the record for fast search.
+	Index uint64
+	// Key is the unique key of the record.
+	Key string
+	// Value is the value of the record.
+	Value []byte
+}
+
 // NewWAL creates a new WAL with the given configuration.
 func NewWAL(config Config) (*Wal, error) {
 	if err := os.MkdirAll(config.Dir, 0755); err != nil {
@@ -167,42 +177,45 @@ func (c *Wal) CurrentIndex() uint64 {
 	return c.lastIndex.Load()
 }
 
-// Write writes key-value pair to the log.
-func (c *Wal) Write(index uint64, key string, value []byte) error {
+func (c *Wal) WriteBatch(batch []Record) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	buf := bytes.NewBuffer(nil)
 
-	if _, exists := c.index[index]; exists {
-		return ErrExists
+	for _, record := range batch {
+		if _, exists := c.index[record.Index]; exists {
+			return ErrExists
+		}
+		if err := c.rotateIfNeeded(); err != nil {
+			return err
+		}
+		m := msg{Key: record.Key, Value: record.Value, Idx: record.Index}
+		m.Checksum = m.calculateChecksum()
+		data, err := msgpack.Marshal(m)
+		if err != nil {
+			return errors.Wrap(err, "failed to encode msg")
+		}
+		buf.Write(data)
+		c.tmpIndex[record.Index] = m
 	}
 
-	if err := c.rotateIfNeeded(); err != nil {
-		return err
-	}
-
-	m := msg{Key: key, Value: value, Idx: index}
-	m.Checksum = m.calculateChecksum()
-
-	data, err := msgpack.Marshal(m)
-	if err != nil {
-		return errors.Wrap(err, "failed to encode msg")
-	}
-
-	if _, err := c.log.Write(data); err != nil {
+	if _, err := c.log.Write(buf.Bytes()); err != nil {
 		return errors.Wrap(err, "failed to write msg to log")
 	}
-
 	if c.isInSyncDiskMode {
 		if err := c.log.Sync(); err != nil {
 			return errors.Wrap(err, "failed to sync log")
 		}
 	}
-
-	c.lastOffset += int64(len(data))
-	c.lastIndex.Add(1)
-	c.tmpIndex[index] = m
+	c.lastOffset += int64(buf.Len())
+	c.lastIndex.Add(uint64(len(batch)))
 
 	return nil
+}
+
+// Write writes key-value pair to the log.
+func (c *Wal) Write(index uint64, key string, value []byte) error {
+	return c.WriteBatch([]Record{{Index: index, Key: key, Value: value}})
 }
 
 // WriteTombstone writes a tombstone record for the given index.
