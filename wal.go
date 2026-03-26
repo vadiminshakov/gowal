@@ -199,6 +199,7 @@ func (c *Wal) WriteBatch(batch []Record) error {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	currentLastIndex := c.lastIndex.Load()
 
 	for _, record := range batch {
 		if _, exists := c.index[record.Index]; exists {
@@ -230,10 +231,12 @@ func (c *Wal) WriteBatch(batch []Record) error {
 
 		for _, m := range messages {
 			c.tmpIndex[m.Idx] = m
+			if m.Idx > currentLastIndex {
+				currentLastIndex = m.Idx
+			}
 		}
 
 		c.lastOffset += int64(c.buf.Len())
-		c.lastIndex.Add(uint64(len(messages)))
 
 		c.buf.Reset()
 		messages = messages[:0]
@@ -265,6 +268,7 @@ func (c *Wal) WriteBatch(batch []Record) error {
 	if err := flush(); err != nil {
 		return err
 	}
+	c.lastIndex.Store(currentLastIndex)
 	return nil
 }
 
