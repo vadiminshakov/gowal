@@ -504,6 +504,42 @@ func TestWriteBatch_AcrossSegmentThreshold(t *testing.T) {
 	require.Equal(t, uint64(len(batch)), wal.CurrentIndex())
 }
 
+func TestWriteBatch_RotateWhenTmpIndexAlreadyFull(t *testing.T) {
+	dir := t.TempDir()
+	segmentThreshold := 3
+
+	wal, err := NewWAL(Config{
+		Dir:              dir,
+		Prefix:           "log_",
+		SegmentThreshold: segmentThreshold,
+		MaxSegments:      10,
+		IsInSyncDiskMode: false,
+	})
+	require.NoError(t, err)
+	defer wal.Close()
+
+	for i := 1; i <= segmentThreshold; i++ {
+		require.NoError(t, wal.Write(uint64(i), fmt.Sprintf("k%d", i), []byte("v")))
+	}
+	require.Equal(t, segmentThreshold, len(wal.tmpIndex))
+
+	batch := []Record{
+		{Index: 10, Key: "k10", Value: []byte("v10")},
+		{Index: 11, Key: "k11", Value: []byte("v11")},
+	}
+	require.NoError(t, wal.WriteBatch(batch))
+
+	for i := 1; i <= segmentThreshold; i++ {
+		_, ok := wal.index[uint64(i)]
+		require.True(t, ok)
+	}
+
+	for _, r := range batch {
+		_, ok := wal.tmpIndex[r.Index]
+		require.True(t, ok)
+	}
+}
+
 // getRandomData returns a random byte slice of the given size.
 func getRandomData(sizeBytes int) []byte {
 	if sizeBytes <= 0 {

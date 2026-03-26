@@ -214,6 +214,12 @@ func (c *Wal) WriteBatch(batch []Record) error {
 	messages := make([]msg, 0, c.segmentsThreshold)
 	c.buf.Grow(len(batch) * 128) // small heuristic; avoids repeated growth on small/medium batches
 	nextRotateAfter := c.segmentsThreshold - len(c.tmpIndex)
+	if nextRotateAfter <= 0 {
+		if err := c.rotateIfNeeded(); err != nil {
+			return err
+		}
+		nextRotateAfter = c.segmentsThreshold
+	}
 
 	flush := func() error {
 		if c.buf.Len() == 0 {
