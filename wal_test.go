@@ -540,6 +540,70 @@ func TestWriteBatch_RotateWhenTmpIndexAlreadyFull(t *testing.T) {
 	}
 }
 
+func TestWrite_NotRotated(t *testing.T) {
+	dir := t.TempDir()
+	segmentThreshold := 3
+
+	wal, err := NewWAL(Config{
+		Dir:              dir,
+		Prefix:           "log_",
+		SegmentThreshold: segmentThreshold,
+		MaxSegments:      10,
+		IsInSyncDiskMode: false,
+	})
+	require.NoError(t, err)
+
+	// write 1, 2, 3
+	for i := 1; i <= segmentThreshold; i++ {
+		require.NoError(t, wal.Write(uint64(i), fmt.Sprintf("k%d", i), []byte("v")))
+	}
+
+	// tmpIndex len is 3, rotation will be triggered on 4
+	require.Equal(t, 3, len(wal.tmpIndex))
+
+	require.NoError(t, wal.Write(uint64(segmentThreshold+1), "k4", []byte("v")))
+
+	// tmpIndex now is 1, rotate was triggered on 4 write, not on 3
+	require.Equal(t, 1, len(wal.tmpIndex))
+
+	require.NoError(t, wal.Close())
+	dir = t.TempDir()
+	wal, err = NewWAL(Config{
+		Dir:              dir,
+		Prefix:           "log2_",
+		SegmentThreshold: segmentThreshold,
+		MaxSegments:      10,
+		IsInSyncDiskMode: false,
+	})
+	require.NoError(t, err)
+
+	// write 1, 2, 3
+	for i := 1; i <= segmentThreshold; i++ {
+		require.NoError(t, wal.Write(uint64(i), fmt.Sprintf("k%d", i), []byte("v")))
+	}
+
+	batch := []Record{
+		{Index: 4, Key: "k4", Value: []byte("v")},
+		{Index: 5, Key: "k5", Value: []byte("v")},
+	}
+	require.NoError(t, wal.WriteBatch(batch))
+
+	// rotation was triggered before 4 write, so tmpIndex is 2 now
+	require.Equal(t, 2, len(wal.tmpIndex))
+
+	require.NoError(t, wal.WriteBatch([]Record{{6, "k6", []byte("v")}}))
+
+	// tmpIndex now is 0, cause rotation in batch operation also triggered after write
+	// rotation logic on batch write:
+	// 1) check how many records can be written to current segment
+	// 2) write them, then do rotation
+	// 3) if there are some records left, then go to 1)
+	//
+	// This does not break the existing write logic, it just makes the rotation check in the Write method after WriteBatch redundant.
+	// It needed for backward compatibility
+	require.Equal(t, 0, len(wal.tmpIndex))
+}
+
 // getRandomData returns a random byte slice of the given size.
 func getRandomData(sizeBytes int) []byte {
 	if sizeBytes <= 0 {
