@@ -2,6 +2,7 @@ package gowal
 
 import (
 	"cmp"
+	"fmt"
 	"maps"
 	"os"
 	"slices"
@@ -417,4 +418,122 @@ func TestWriteTombstone(t *testing.T) {
 		require.False(t, existsInMainIndex, "Record should be removed from main index")
 		require.True(t, existsInTmpIndex, "Tombstone should exist in temp index")
 	})
+}
+
+func TestWriteBatch_DuplicateIndexesInBatch(t *testing.T) {
+	dir := t.TempDir()
+	wal, err := NewWAL(Config{
+		Dir:              dir,
+		Prefix:           "log_",
+		SegmentThreshold: 10,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
+	require.NoError(t, err)
+
+	batch := []Record{
+		{Index: 1, Key: "key1", Value: []byte("v1")},
+		{Index: 1, Key: "key1-dup", Value: []byte("v1-dup")},
+	}
+
+	err = wal.WriteBatch(batch)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "duplicate index", "Expected error for duplicate index")
+}
+
+func TestWriteBatch_DuplicateWithExistingIndex(t *testing.T) {
+	dir := t.TempDir()
+	wal, err := NewWAL(Config{
+		Dir:              dir,
+		Prefix:           "log_",
+		SegmentThreshold: 10,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
+	require.NoError(t, err)
+
+	// Write a single entry first
+	require.NoError(t, wal.Write(5, "initial", []byte("value")))
+
+	batch := []Record{
+		{Index: 5, Key: "key5-conflict", Value: []byte("valueB")},
+		{Index: 6, Key: "key6", Value: []byte("value6")},
+	}
+
+	err = wal.WriteBatch(batch)
+	require.ErrorIs(t, err, ErrExists, "expected ErrExists for index conflict with existing WAL entry")
+}
+
+func TestWriteBatch_AcrossSegmentThreshold(t *testing.T) {
+	dir := t.TempDir()
+	segmentThreshold := 3
+
+	wal, err := NewWAL(Config{
+		Dir:              dir,
+		Prefix:           "log_",
+		SegmentThreshold: segmentThreshold,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
+	require.NoError(t, err)
+	defer wal.Close()
+
+	// Build a batch exactly at threshold boundary
+	batch := make([]Record, segmentThreshold+1)
+	for i := 0; i < len(batch); i++ {
+		batch[i] = Record{
+			Index: uint64(i + 1),
+			Key:   fmt.Sprintf("key%d", i+1),
+			Value: []byte(fmt.Sprintf("value%d", i+1)),
+		}
+	}
+
+	require.NoError(t, wal.WriteBatch(batch))
+
+	// All records should be queryable via Get
+	for _, r := range batch {
+		key, value, err := wal.Get(r.Index)
+		require.NoError(t, err, "expected record to exist after batch write and rotation")
+		require.Equal(t, r.Key, key)
+		require.Equal(t, r.Value, value)
+	}
+
+	// CurrentIndex should reflect the highest index
+	require.Equal(t, uint64(len(batch)), wal.CurrentIndex())
+}
+
+func TestWriteBatch_RotateWhenTmpIndexAlreadyFull(t *testing.T) {
+	dir := t.TempDir()
+	segmentThreshold := 3
+
+	wal, err := NewWAL(Config{
+		Dir:              dir,
+		Prefix:           "log_",
+		SegmentThreshold: segmentThreshold,
+		MaxSegments:      10,
+		IsInSyncDiskMode: false,
+	})
+	require.NoError(t, err)
+	defer wal.Close()
+
+	for i := 1; i <= segmentThreshold; i++ {
+		require.NoError(t, wal.Write(uint64(i), fmt.Sprintf("k%d", i), []byte("v")))
+	}
+	require.Equal(t, segmentThreshold, len(wal.tmpIndex))
+
+	batch := []Record{
+		{Index: 10, Key: "k10", Value: []byte("v10")},
+		{Index: 11, Key: "k11", Value: []byte("v11")},
+	}
+	require.NoError(t, wal.WriteBatch(batch))
+
+	for i := 1; i <= segmentThreshold; i++ {
+		_, ok := wal.index[uint64(i)]
+		require.True(t, ok)
+	}
+
+	for _, r := range batch {
+		_, ok := wal.tmpIndex[r.Index]
+		require.True(t, ok)
+	}
 }
