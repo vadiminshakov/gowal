@@ -3,7 +3,6 @@ package gowal
 import (
 	"bytes"
 	"encoding/gob"
-	"fmt"
 	"iter"
 	"os"
 	"path"
@@ -172,13 +171,9 @@ func (c *Wal) CurrentIndex() uint64 {
 }
 
 // WriteBatch appends a batch of records to the WAL in a single operation.
-func (c *Wal) WriteBatch(batch []Record) error {
-	if len(batch) == 0 {
+func (c *Wal) WriteBatch(batch Batch) error {
+	if batch.Len() == 0 {
 		return nil
-	}
-
-	if err := c.checkInternalDuplicates(batch); err != nil {
-		return err
 	}
 
 	c.mu.Lock()
@@ -192,11 +187,12 @@ func (c *Wal) WriteBatch(batch []Record) error {
 		return err
 	}
 
+	records := batch.Records()
 	c.buf.Reset()
-	c.buf.Grow(len(batch) * 128) // small heuristic; avoids repeated growth on small/medium batches
-	messages := make([]msg, 0, len(batch))
+	c.buf.Grow(batch.Len() * 128) // small heuristic; avoids repeated growth on small/medium batches
+	messages := make([]msg, 0, batch.Len())
 
-	for _, record := range batch {
+	for _, record := range records {
 		m := msg{Key: record.Key, Value: record.Value, Idx: record.Index}
 		m.Checksum = m.calculateChecksum()
 		messages = append(messages, m)
@@ -217,7 +213,7 @@ func (c *Wal) WriteBatch(batch []Record) error {
 	}
 
 	c.lastOffset += int64(c.buf.Len())
-	c.lastIndex.Add(uint64(len(batch)))
+	c.lastIndex.Add(uint64(batch.Len()))
 	for _, m := range messages {
 		c.tmpIndex[m.Idx] = m
 	}
@@ -225,19 +221,8 @@ func (c *Wal) WriteBatch(batch []Record) error {
 	return nil
 }
 
-func (c *Wal) checkInternalDuplicates(batch []Record) error {
-	indexes := make(map[uint64]struct{}, len(batch))
-	for _, record := range batch {
-		if _, exists := indexes[record.Index]; exists {
-			return fmt.Errorf("duplicate index %d ", record.Index)
-		}
-		indexes[record.Index] = struct{}{}
-	}
-	return nil
-}
-
-func (c *Wal) checkExternalCollisions(batch []Record) error {
-	for _, record := range batch {
+func (c *Wal) checkExternalCollisions(batch Batch) error {
+	for _, record := range batch.Records() {
 		if _, exists := c.record(record.Index); exists {
 			return ErrExists
 		}
@@ -257,7 +242,12 @@ func (c *Wal) record(index uint64) (msg, bool) {
 
 // Write writes key-value pair to the log.
 func (c *Wal) Write(index uint64, key string, value []byte) error {
-	return c.WriteBatch([]Record{{Index: index, Key: key, Value: value}})
+	batch, err := NewBatch(Record{Index: index, Key: key, Value: value})
+	if err != nil {
+		return err
+	}
+
+	return c.WriteBatch(batch)
 }
 
 // WriteTombstone writes a tombstone record for the given index.

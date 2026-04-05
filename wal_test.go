@@ -421,22 +421,10 @@ func TestWriteTombstone(t *testing.T) {
 }
 
 func TestWriteBatch_DuplicateIndexesInBatch(t *testing.T) {
-	dir := t.TempDir()
-	wal, err := NewWAL(Config{
-		Dir:              dir,
-		Prefix:           "log_",
-		SegmentThreshold: 10,
-		MaxSegments:      5,
-		IsInSyncDiskMode: false,
-	})
-	require.NoError(t, err)
-
-	batch := []Record{
-		{Index: 1, Key: "key1", Value: []byte("v1")},
-		{Index: 1, Key: "key1-dup", Value: []byte("v1-dup")},
-	}
-
-	err = wal.WriteBatch(batch)
+	_, err := NewBatch(
+		Record{Index: 1, Key: "key1", Value: []byte("v1")},
+		Record{Index: 1, Key: "key1-dup", Value: []byte("v1-dup")},
+	)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "duplicate index", "Expected error for duplicate index")
 }
@@ -455,10 +443,11 @@ func TestWriteBatch_DuplicateWithExistingIndex(t *testing.T) {
 	// Write a single entry first
 	require.NoError(t, wal.Write(5, "initial", []byte("value")))
 
-	batch := []Record{
-		{Index: 5, Key: "key5-conflict", Value: []byte("valueB")},
-		{Index: 6, Key: "key6", Value: []byte("value6")},
-	}
+	batch, err := NewBatch(
+		Record{Index: 5, Key: "key5-conflict", Value: []byte("valueB")},
+		Record{Index: 6, Key: "key6", Value: []byte("value6")},
+	)
+	require.NoError(t, err)
 
 	err = wal.WriteBatch(batch)
 	require.ErrorIs(t, err, ErrExists, "expected ErrExists for index conflict with existing WAL entry")
@@ -483,10 +472,11 @@ func TestWriteBatch_RotateWhenTmpIndexAlreadyFull(t *testing.T) {
 	}
 	require.Equal(t, segmentThreshold, len(wal.tmpIndex))
 
-	batch := []Record{
-		{Index: 10, Key: "k10", Value: []byte("v10")},
-		{Index: 11, Key: "k11", Value: []byte("v11")},
-	}
+	batch, err := NewBatch(
+		Record{Index: 10, Key: "k10", Value: []byte("v10")},
+		Record{Index: 11, Key: "k11", Value: []byte("v11")},
+	)
+	require.NoError(t, err)
 	require.NoError(t, wal.WriteBatch(batch))
 
 	for i := 1; i <= segmentThreshold; i++ {
@@ -494,7 +484,7 @@ func TestWriteBatch_RotateWhenTmpIndexAlreadyFull(t *testing.T) {
 		require.True(t, ok)
 	}
 
-	for _, r := range batch {
+	for _, r := range batch.Records() {
 		_, ok := wal.tmpIndex[r.Index]
 		require.True(t, ok)
 	}
