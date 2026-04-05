@@ -170,33 +170,16 @@ func (c *Wal) CurrentIndex() uint64 {
 	return c.lastIndex.Load()
 }
 
-// WriteBatch appends a batch of records to the WAL in a single operation.
-func (c *Wal) WriteBatch(batch Batch) error {
-	if batch.Len() == 0 {
-		return nil
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if err := c.checkExternalCollisions(batch); err != nil {
-		return err
-	}
-
+// writeMessages is an internal method that encodes and writes messages to the log.
+func (c *Wal) writeMessages(messages []msg) error {
 	if err := c.rotateIfNeeded(); err != nil {
 		return err
 	}
 
-	records := batch.Records()
 	c.buf.Reset()
-	c.buf.Grow(batch.Len() * 128) // small heuristic; avoids repeated growth on small/medium batches
-	messages := make([]msg, 0, batch.Len())
+	c.buf.Grow(len(messages) * 128) // small heuristic; avoids repeated growth on small/medium batches
 
-	for _, record := range records {
-		m := msg{Key: record.Key, Value: record.Value, Idx: record.Index}
-		m.Checksum = m.calculateChecksum()
-		messages = append(messages, m)
-
+	for _, m := range messages {
 		if err := c.msgpackEnc.Encode(m); err != nil {
 			return errors.Wrap(err, "failed to encode msg")
 		}
@@ -213,10 +196,38 @@ func (c *Wal) WriteBatch(batch Batch) error {
 	}
 
 	c.lastOffset += int64(c.buf.Len())
-	c.lastIndex.Add(uint64(batch.Len()))
 	for _, m := range messages {
 		c.tmpIndex[m.Idx] = m
 	}
+
+	return nil
+}
+
+// WriteBatch appends a batch of records to the WAL in a single operation.
+func (c *Wal) WriteBatch(batch Batch) error {
+	if batch.Len() == 0 {
+		return nil
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if err := c.checkExternalCollisions(batch); err != nil {
+		return err
+	}
+
+	messages := make([]msg, 0, batch.Len())
+	for _, r := range batch.Records() {
+		m := msg{Key: r.Key, Value: r.Value, Idx: r.Index}
+		m.Checksum = m.calculateChecksum()
+		messages = append(messages, m)
+	}
+
+	if err := c.writeMessages(messages); err != nil {
+		return err
+	}
+
+	c.lastIndex.Add(uint64(batch.Len()))
 
 	return nil
 }
@@ -242,12 +253,22 @@ func (c *Wal) record(index uint64) (msg, bool) {
 
 // Write writes key-value pair to the log.
 func (c *Wal) Write(index uint64, key string, value []byte) error {
-	batch, err := NewBatch(Record{Index: index, Key: key, Value: value})
-	if err != nil {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if _, exists := c.record(index); exists {
+		return ErrExists
+	}
+
+	m := msg{Key: key, Value: value, Idx: index}
+	m.Checksum = m.calculateChecksum()
+
+	if err := c.writeMessages([]msg{m}); err != nil {
 		return err
 	}
 
-	return c.WriteBatch(batch)
+	c.lastIndex.Add(1)
+	return nil
 }
 
 // WriteTombstone writes a tombstone record for the given index.
@@ -257,43 +278,19 @@ func (c *Wal) WriteTombstone(index uint64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// check if record exists in main index or temp index
 	existingMsg, ok := c.record(index)
-
-	// if no record exists, return nil (no-op)
 	if !ok {
 		return nil
 	}
 
-	if err := c.rotateIfNeeded(); err != nil {
-		return err
-	}
-
-	// create tombstone with existing key
 	tombstone := msg{Key: existingMsg.Key, Value: []byte("tombstone"), Idx: index}
 	tombstone.Checksum = tombstone.calculateChecksum()
 
-	data, err := msgpack.Marshal(tombstone)
-	if err != nil {
-		return errors.Wrap(err, "failed to encode tombstone")
+	if err := c.writeMessages([]msg{tombstone}); err != nil {
+		return err
 	}
 
-	if _, err := c.log.Write(data); err != nil {
-		return errors.Wrap(err, "failed to write tombstone to log")
-	}
-
-	if c.isInSyncDiskMode {
-		if err := c.log.Sync(); err != nil {
-			return errors.Wrap(err, "failed to sync log")
-		}
-	}
-
-	c.lastOffset += int64(len(data))
-	c.tmpIndex[index] = tombstone
-
-	// remove from main index if it exists there to avoid confusion
 	delete(c.index, index)
-
 	return nil
 }
 
