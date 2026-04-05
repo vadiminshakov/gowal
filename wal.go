@@ -154,18 +154,7 @@ func (c *Wal) Get(index uint64) (string, []byte, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	// check temporary index first (smaller, more likely to contain recent data)
-	msg, ok := c.tmpIndex[index]
-	if ok {
-		// verify checksum on read
-		if err := msg.verifyChecksum(); err != nil {
-			return "", nil, err
-		}
-		return msg.Key, msg.Value, nil
-	}
-
-	// check main index for historical segments
-	msg, ok = c.index[index]
+	msg, ok := c.record(index)
 	if ok {
 		// verify checksum on read
 		if err := msg.verifyChecksum(); err != nil {
@@ -188,25 +177,15 @@ func (c *Wal) WriteBatch(batch []Record) error {
 		return nil
 	}
 
-	// check if indexes are unique
-	indexes := make(map[uint64]struct{}, len(batch))
-	for _, record := range batch {
-		if _, exists := indexes[record.Index]; exists {
-			return fmt.Errorf("duplicate index %d ", record.Index)
-		}
-		indexes[record.Index] = struct{}{}
+	if err := c.checkInternalDuplicates(batch); err != nil {
+		return err
 	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for _, record := range batch {
-		if _, exists := c.index[record.Index]; exists {
-			return ErrExists
-		}
-		if _, exists := c.tmpIndex[record.Index]; exists {
-			return ErrExists
-		}
+	if err := c.checkExternalCollisions(batch); err != nil {
+		return err
 	}
 
 	if err := c.rotateIfNeeded(); err != nil {
@@ -246,6 +225,36 @@ func (c *Wal) WriteBatch(batch []Record) error {
 	return nil
 }
 
+func (c *Wal) checkInternalDuplicates(batch []Record) error {
+	indexes := make(map[uint64]struct{}, len(batch))
+	for _, record := range batch {
+		if _, exists := indexes[record.Index]; exists {
+			return fmt.Errorf("duplicate index %d ", record.Index)
+		}
+		indexes[record.Index] = struct{}{}
+	}
+	return nil
+}
+
+func (c *Wal) checkExternalCollisions(batch []Record) error {
+	for _, record := range batch {
+		if _, exists := c.record(record.Index); exists {
+			return ErrExists
+		}
+	}
+	return nil
+}
+
+func (c *Wal) record(index uint64) (msg, bool) {
+	if m, ok := c.tmpIndex[index]; ok {
+		return m, true
+	}
+	if m, ok := c.index[index]; ok {
+		return m, true
+	}
+	return msg{}, false
+}
+
 // Write writes key-value pair to the log.
 func (c *Wal) Write(index uint64, key string, value []byte) error {
 	return c.WriteBatch([]Record{{Index: index, Key: key, Value: value}})
@@ -259,19 +268,10 @@ func (c *Wal) WriteTombstone(index uint64) error {
 	defer c.mu.Unlock()
 
 	// check if record exists in main index or temp index
-	var existingMsg msg
-	var exists bool
-
-	if msg, ok := c.index[index]; ok {
-		existingMsg = msg
-		exists = true
-	} else if msg, ok := c.tmpIndex[index]; ok {
-		existingMsg = msg
-		exists = true
-	}
+	existingMsg, ok := c.record(index)
 
 	// if no record exists, return nil (no-op)
-	if !exists {
+	if !ok {
 		return nil
 	}
 
