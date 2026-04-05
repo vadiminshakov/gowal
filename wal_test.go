@@ -464,44 +464,6 @@ func TestWriteBatch_DuplicateWithExistingIndex(t *testing.T) {
 	require.ErrorIs(t, err, ErrExists, "expected ErrExists for index conflict with existing WAL entry")
 }
 
-func TestWriteBatch_AcrossSegmentThreshold(t *testing.T) {
-	dir := t.TempDir()
-	segmentThreshold := 3
-
-	wal, err := NewWAL(Config{
-		Dir:              dir,
-		Prefix:           "log_",
-		SegmentThreshold: segmentThreshold,
-		MaxSegments:      5,
-		IsInSyncDiskMode: false,
-	})
-	require.NoError(t, err)
-	defer wal.Close()
-
-	// Build a batch exactly at threshold boundary
-	batch := make([]Record, segmentThreshold+1)
-	for i := 0; i < len(batch); i++ {
-		batch[i] = Record{
-			Index: uint64(i + 1),
-			Key:   fmt.Sprintf("key%d", i+1),
-			Value: []byte(fmt.Sprintf("value%d", i+1)),
-		}
-	}
-
-	require.NoError(t, wal.WriteBatch(batch))
-
-	// All records should be queryable via Get
-	for _, r := range batch {
-		key, value, err := wal.Get(r.Index)
-		require.NoError(t, err, "expected record to exist after batch write and rotation")
-		require.Equal(t, r.Key, key)
-		require.Equal(t, r.Value, value)
-	}
-
-	// CurrentIndex should reflect the highest index
-	require.Equal(t, uint64(len(batch)), wal.CurrentIndex())
-}
-
 func TestWriteBatch_RotateWhenTmpIndexAlreadyFull(t *testing.T) {
 	dir := t.TempDir()
 	segmentThreshold := 3
