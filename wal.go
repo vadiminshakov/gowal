@@ -170,36 +170,23 @@ func (c *Wal) CurrentIndex() uint64 {
 	return c.lastIndex.Load()
 }
 
-// writeMessages is an internal method that encodes and writes messages to the log.
-func (c *Wal) writeMessages(messages []msg) error {
-	if err := c.rotateIfNeeded(); err != nil {
+// Write writes key-value pair to the log.
+func (c *Wal) Write(index uint64, key string, value []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if _, exists := c.record(index); exists {
+		return ErrExists
+	}
+
+	m := msg{Key: key, Value: value, Idx: index}
+	m.Checksum = m.calculateChecksum()
+
+	if err := c.writeMessages([]msg{m}); err != nil {
 		return err
 	}
 
-	c.buf.Reset()
-	c.buf.Grow(len(messages) * 128) // small heuristic; avoids repeated growth on small/medium batches
-
-	for _, m := range messages {
-		if err := c.msgpackEnc.Encode(m); err != nil {
-			return errors.Wrap(err, "failed to encode msg")
-		}
-	}
-
-	if _, err := c.log.Write(c.buf.Bytes()); err != nil {
-		return errors.Wrap(err, "failed to write msg to log")
-	}
-
-	if c.isInSyncDiskMode {
-		if err := c.log.Sync(); err != nil {
-			return errors.Wrap(err, "failed to sync log")
-		}
-	}
-
-	c.lastOffset += int64(c.buf.Len())
-	for _, m := range messages {
-		c.tmpIndex[m.Idx] = m
-	}
-
+	c.lastIndex.Add(1)
 	return nil
 }
 
@@ -241,36 +228,6 @@ func (c *Wal) checkExternalCollisions(batch Batch) error {
 	return nil
 }
 
-func (c *Wal) record(index uint64) (msg, bool) {
-	if m, ok := c.tmpIndex[index]; ok {
-		return m, true
-	}
-	if m, ok := c.index[index]; ok {
-		return m, true
-	}
-	return msg{}, false
-}
-
-// Write writes key-value pair to the log.
-func (c *Wal) Write(index uint64, key string, value []byte) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if _, exists := c.record(index); exists {
-		return ErrExists
-	}
-
-	m := msg{Key: key, Value: value, Idx: index}
-	m.Checksum = m.calculateChecksum()
-
-	if err := c.writeMessages([]msg{m}); err != nil {
-		return err
-	}
-
-	c.lastIndex.Add(1)
-	return nil
-}
-
 // WriteTombstone writes a tombstone record for the given index.
 // If no record exists for the index, returns nil (no-op).
 // If a record exists, overwrites it with a tombstone.
@@ -292,6 +249,49 @@ func (c *Wal) WriteTombstone(index uint64) error {
 
 	delete(c.index, index)
 	return nil
+}
+
+// writeMessages is an internal method that encodes and writes messages to the log.
+func (c *Wal) writeMessages(messages []msg) error {
+	if err := c.rotateIfNeeded(); err != nil {
+		return err
+	}
+
+	c.buf.Reset()
+	c.buf.Grow(len(messages) * 128) // small heuristic; avoids repeated growth on small/medium batches
+
+	for _, m := range messages {
+		if err := c.msgpackEnc.Encode(m); err != nil {
+			return errors.Wrap(err, "failed to encode msg")
+		}
+	}
+
+	if _, err := c.log.Write(c.buf.Bytes()); err != nil {
+		return errors.Wrap(err, "failed to write msg to log")
+	}
+
+	if c.isInSyncDiskMode {
+		if err := c.log.Sync(); err != nil {
+			return errors.Wrap(err, "failed to sync log")
+		}
+	}
+
+	c.lastOffset += int64(c.buf.Len())
+	for _, m := range messages {
+		c.tmpIndex[m.Idx] = m
+	}
+
+	return nil
+}
+
+func (c *Wal) record(index uint64) (msg, bool) {
+	if m, ok := c.tmpIndex[index]; ok {
+		return m, true
+	}
+	if m, ok := c.index[index]; ok {
+		return m, true
+	}
+	return msg{}, false
 }
 
 // Iterator returns push-based iterator for the WAL messages.
