@@ -1,9 +1,8 @@
 package gowal
 
 import (
+	"bytes"
 	"fmt"
-	"github.com/pkg/errors"
-	msgpack "github.com/vmihailenco/msgpack/v5"
 	"io"
 	"maps"
 	"os"
@@ -11,7 +10,82 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/pkg/errors"
+	msgpack "github.com/vmihailenco/msgpack/v5"
 )
+
+type segment struct {
+	path    string
+	file    *os.File
+	index   map[uint64]msg
+	buf     bytes.Buffer
+	encoder *msgpack.Encoder
+}
+
+func openSegment(segmentPath string) (*segment, error) {
+	file, err := os.OpenFile(segmentPath, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to open log segment file")
+	}
+
+	index, err := loadIndexes(file)
+	if err != nil {
+		_ = file.Close()
+		return nil, errors.Wrap(err, "failed to build index from log segment")
+	}
+
+	s := &segment{
+		path:  segmentPath,
+		file:  file,
+		index: index,
+	}
+	s.encoder = msgpack.NewEncoder(&s.buf)
+
+	return s, nil
+}
+
+func (s *segment) Append(messages []msg) error {
+	s.buf.Reset()
+	s.buf.Grow(len(messages) * 128) // small heuristic; avoids repeated growth on small/medium batches
+
+	for _, m := range messages {
+		if err := s.encoder.Encode(m); err != nil {
+			return errors.Wrap(err, "failed to encode msg")
+		}
+	}
+
+	if _, err := s.file.Write(s.buf.Bytes()); err != nil {
+		return errors.Wrap(err, "failed to write msg to log")
+	}
+
+	for _, m := range messages {
+		s.index[m.Idx] = m
+	}
+
+	return nil
+}
+
+func (s *segment) Sync() error {
+	return s.file.Sync()
+}
+
+func (s *segment) Close() error {
+	return s.file.Close()
+}
+
+func (s *segment) Len() int {
+	return len(s.index)
+}
+
+func (s *segment) Record(index uint64) (msg, bool) {
+	m, ok := s.index[index]
+	return m, ok
+}
+
+func (s *segment) Path() string {
+	return s.path
+}
 
 // removeOldestSegment deletes the oldest segment.
 func (c *Wal) removeOldestSegment() error {
@@ -38,54 +112,47 @@ func (c *Wal) removeOldestSegment() error {
 
 // openNewSegment creates new segment.
 func (c *Wal) openNewSegment() error {
-	newSegmentName := path.Join(c.pathToLogsDir, c.prefix+strconv.Itoa(c.segmentsNumber))
-	logFile, err := os.OpenFile(newSegmentName, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0644)
+	activeSegment, err := openSegment(segmentPath(c.pathToLogsDir, c.prefix, c.nextSegmentNumber))
 	if err != nil {
 		return errors.Wrap(err, "failed to create new log file")
 	}
 
-	c.segmentsNumber++
+	c.nextSegmentNumber++
 
-	// transfer tmpIndex to main index when creating new segment
-	maps.Copy(c.index, c.tmpIndex)
-	c.tmpIndex = make(map[uint64]msg)
-
-	c.log = logFile
-	c.lastOffset = 0
+	c.activeSegment = activeSegment
 
 	return nil
 }
 
 // oldestSegmentName returns name of the oldest segment.
 func (c *Wal) oldestSegmentName() string {
-	oldestSegmentNumber := c.segmentsNumber - c.maxSegments
-	return path.Join(c.pathToLogsDir, c.prefix+strconv.Itoa(oldestSegmentNumber))
+	oldestSegmentNumber := c.nextSegmentNumber - c.maxSegments
+	return segmentPath(c.pathToLogsDir, c.prefix, oldestSegmentNumber)
 }
 
-// segmentInfoAndIndex loads segment info (file descriptor, name, size, etc) and index from segment files.
-// Works like loadSegment, but for multiple segments.
-func segmentInfoAndIndex(segNumbers []int, path string) (*os.File, int64, map[uint64]msg, error) {
+// buildIndexAndOpenActiveSegment builds and returns an index from closed segments and returns active (the newest) segment.
+func buildIndexAndOpenActiveSegment(segmentNumbers []int, basePath string) (*segment, map[uint64]msg, error) {
 	index := make(map[uint64]msg)
-	var (
-		logFileFD      *os.File
-		lastOffset     int64
-		idxFromSegment map[uint64]msg
-		err            error
-	)
-	for _, segindex := range segNumbers {
-		if logFileFD != nil {
-			logFileFD.Close()
-		}
+	var activeSegment *segment
 
-		logFileFD, lastOffset, idxFromSegment, err = loadSegment(path + strconv.Itoa(segindex))
+	for i, segmentNumber := range segmentNumbers {
+		s, err := openSegment(basePath + strconv.Itoa(segmentNumber))
 		if err != nil {
-			return nil, 0, nil, errors.Wrap(err, "failed to load indexes from msg log file")
+			return nil, nil, errors.Wrap(err, "failed to load indexes from msg log file")
 		}
 
-		maps.Copy(index, idxFromSegment)
+		if i < len(segmentNumbers)-1 {
+			maps.Copy(index, s.index)
+			if err := s.Close(); err != nil {
+				return nil, nil, errors.Wrap(err, "failed to close historical segment")
+			}
+			continue
+		}
+
+		activeSegment = s
 	}
 
-	return logFileFD, lastOffset, index, nil
+	return activeSegment, index, nil
 }
 
 // removeCorruptedSegments removes corrupted segments.
@@ -104,39 +171,6 @@ func removeCorruptedSegments(segmentNumbers []int, basePath string) ([]string, e
 	}
 
 	return removedFiles, nil
-}
-
-// loadSegment loads segment info (file descriptor, name, size, etc) and index from segment file.
-func loadSegment(path string) (fd *os.File, lastOffset int64, index map[uint64]msg, err error) {
-	fd, err = os.OpenFile(path, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0644)
-	if err != nil {
-		return nil, 0, nil, errors.Wrap(err, "failed to open log segment file")
-	}
-
-	lastOffset, err = calculateLastOffset(fd)
-	if err != nil {
-		return nil, 0, nil, errors.Wrap(err, "failed to calculate last offset")
-	}
-
-	index, err = loadIndexes(fd)
-	if err != nil {
-		return nil, 0, nil, errors.Wrap(err, "failed to build index from log segment")
-	}
-
-	return fd, lastOffset, index, nil
-}
-
-func calculateLastOffset(fd *os.File) (int64, error) {
-	fileInfo, err := fd.Stat()
-	if err != nil {
-		return 0, fmt.Errorf("failed to get file info: %v", err)
-	}
-
-	if fileInfo.Size() == 0 {
-		return 0, nil
-	}
-
-	return fileInfo.Size() + 1, nil
 }
 
 // handleCorruptedSegment checks segment for corruption and removes if corrupted.
@@ -259,4 +293,8 @@ func loadIndexFromSegment(segmentPath string) (map[uint64]msg, error) {
 	defer file.Close()
 
 	return loadIndexes(file)
+}
+
+func segmentPath(dir, prefix string, number int) string {
+	return path.Join(dir, prefix+strconv.Itoa(number))
 }

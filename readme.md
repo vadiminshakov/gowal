@@ -102,16 +102,16 @@ The behavior of the WAL can be configured using several configuration options (`
 
 ## Architecture
 
-GoWAL uses a segmented architecture with two-level indexing for efficient write and read operations:
+GoWAL uses a segmented architecture with segment-owned indexing for efficient write and read operations:
 
 #### Segments
-Data is split into numbered files (`segment_0`, `segment_1`, etc.). Each record contains:
+Data is split into numbered files (`segment_0`, `segment_1`, etc.). Internally, each active segment owns its file descriptor and in-memory index. Each record contains:
 - Index, Key, Value
 - CRC32 checksum for integrity verification
 
-#### Two-Level Indexing
-- **tmpIndex**: In-memory index for the current active segment. Maps record index to its position in the segment.
-- **index**: Main in-memory index for all persisted (closed) segments. Provides fast lookups across historical data.
+#### Segment Indexing
+- **active segment index**: In-memory index owned by the current active segment.
+- **historical index**: Main in-memory index for all closed segments. Provides fast lookups across historical data.
 
 #### Write Flow
 1. Check if index already exists (prevents duplicates)
@@ -119,21 +119,20 @@ Data is split into numbered files (`segment_0`, `segment_1`, etc.). Each record 
 3. Calculate CRC32 checksum for the record
 4. Serialize record (with checksum) using MessagePack
 5. Write to current segment file
-6. Add entry to `tmpIndex`
+6. Add entry to the active segment index
 
 #### Rotation & Segment Management
-When `tmpIndex` size exceeds `SegmentThreshold`:
+When the active segment size exceeds `SegmentThreshold`:
 1. Current segment is closed
-2. `tmpIndex` is merged into main `index`
-3. `tmpIndex` is cleared
-4. New segment is created
+2. Active segment index is merged into the historical index
+3. New segment is created
 
 When `MaxSegments` limit is reached, the oldest segment is automatically deleted along with its index entries to manage disk space.
 
 #### Read Operations
 Lookups check both indexes:
-1. Check `tmpIndex` first (current segment, smaller and more likely to contain recent data)
-2. If not found, check main `index` (historical segments)
+1. Check the active segment index first (current segment, smaller and more likely to contain recent data)
+2. If not found, check the historical index
 3. Verify checksum before returning data
 
 ### Contributing

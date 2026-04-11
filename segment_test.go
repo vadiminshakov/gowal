@@ -1,0 +1,71 @@
+package gowal
+
+import (
+	"os"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestSegmentAppendAddsRecordsToIndex(t *testing.T) {
+	dir := t.TempDir()
+
+	seg, err := openSegment(segmentPath(dir, "log_", 0))
+	require.NoError(t, err)
+	defer seg.Close()
+
+	require.Equal(t, segmentPath(dir, "log_", 0), seg.Path())
+
+	message := msg{Idx: 1, Key: "key1", Value: []byte("value1")}
+	message.Checksum = message.calculateChecksum()
+
+	require.NoError(t, seg.Append([]msg{message}))
+
+	record, ok := seg.Record(1)
+	require.True(t, ok)
+	require.Equal(t, message, record)
+	require.Equal(t, 1, seg.Len())
+}
+
+func TestOpenSegmentLoadsIndexFromExistingFile(t *testing.T) {
+	dir := t.TempDir()
+
+	seg, err := openSegment(segmentPath(dir, "log_", 0))
+	require.NoError(t, err)
+
+	message := msg{Idx: 1, Key: "key1", Value: []byte("value1")}
+	message.Checksum = message.calculateChecksum()
+
+	require.NoError(t, seg.Append([]msg{message}))
+	require.NoError(t, seg.Close())
+
+	loadedSegment, err := openSegment(segmentPath(dir, "log_", 0))
+	require.NoError(t, err)
+	defer loadedSegment.Close()
+
+	record, ok := loadedSegment.Record(1)
+	require.True(t, ok)
+	require.Equal(t, message, record)
+}
+
+func TestSegmentLoadCorruptedSegmentReturnsError(t *testing.T) {
+	dir := t.TempDir()
+
+	seg, err := openSegment(segmentPath(dir, "log_", 0))
+	require.NoError(t, err)
+
+	message := msg{Idx: 1, Key: "key1", Value: []byte("value1")}
+	message.Checksum = message.calculateChecksum()
+
+	require.NoError(t, seg.Append([]msg{message}))
+	require.NoError(t, seg.Close())
+
+	file, err := os.OpenFile(seg.Path(), os.O_APPEND|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	_, err = file.Write([]byte("corrupted data"))
+	require.NoError(t, err)
+	require.NoError(t, file.Close())
+
+	_, err = openSegment(seg.Path())
+	require.Error(t, err)
+}

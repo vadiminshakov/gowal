@@ -1,8 +1,6 @@
 package gowal
 
 import (
-	"bytes"
-	"encoding/gob"
 	"iter"
 	"os"
 	"path"
@@ -11,7 +9,6 @@ import (
 	"sync/atomic"
 
 	"github.com/pkg/errors"
-	"github.com/vmihailenco/msgpack/v5"
 )
 
 var ErrExists = errors.New("msg with such index already exists")
@@ -26,35 +23,19 @@ type Wal struct {
 	// mutex for thread safety
 	mu sync.RWMutex
 
-	// append-only log with proposed messages that node consumed
-	log *os.File
+	// activeSegment is the segment that accepts new writes.
+	activeSegment *segment
 
-	// index that matches height of msg record with offset in file
-	index    map[uint64]msg
-	tmpIndex map[uint64]msg
-
-	// gob encoder for proposed messages
-	enc *gob.Encoder
-
-	// msgpack encoder for proposed messages
-	msgpackEnc *msgpack.Encoder
-
-	// buffer for proposed messages
-	buf *bytes.Buffer
+	// index stores messages from closed historical segments.
+	index map[uint64]msg
 
 	// path to directory with logs
 	pathToLogsDir string
 
-	// name of the old segment
-	oldestSegName string
-
-	// offset of last record in file
-	lastOffset int64
-
 	lastIndex atomic.Uint64
 
-	// number of segments for log
-	segmentsNumber int
+	// nextSegmentNumber is the number that will be assigned to the next opened segment.
+	nextSegmentNumber int
 
 	// prefix for segment files
 	prefix string
@@ -105,24 +86,21 @@ func NewWAL(config Config) (*Wal, error) {
 		return nil, errors.Wrap(err, "failed to find segment numbers")
 	}
 
-	// load segments into mem
-	fd, lastOffset, index, err := segmentInfoAndIndex(segmentsNumbers, path.Join(config.Dir, config.Prefix))
+	activeSegment, index, err := buildIndexAndOpenActiveSegment(segmentsNumbers, path.Join(config.Dir, config.Prefix))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load log segments")
 	}
-	numberOfSegments := len(index) / config.SegmentThreshold
-	if numberOfSegments == 0 {
-		numberOfSegments = 1
+
+	w := &Wal{
+		activeSegment:     activeSegment,
+		index:             index,
+		pathToLogsDir:     config.Dir,
+		nextSegmentNumber: nextSegmentNumber(segmentsNumbers),
+		prefix:            config.Prefix,
+		segmentsThreshold: config.SegmentThreshold,
+		maxSegments:       config.MaxSegments,
+		isInSyncDiskMode:  config.IsInSyncDiskMode,
 	}
-
-	var buf bytes.Buffer
-	enc := gob.NewEncoder(&buf)
-	msgpackEnc := msgpack.NewEncoder(&buf)
-
-	w := &Wal{log: fd, index: index, tmpIndex: make(map[uint64]msg),
-		buf: &buf, enc: enc, msgpackEnc: msgpackEnc, lastOffset: lastOffset, pathToLogsDir: config.Dir,
-		segmentsNumber: numberOfSegments, prefix: config.Prefix, segmentsThreshold: config.SegmentThreshold,
-		maxSegments: config.MaxSegments, isInSyncDiskMode: config.IsInSyncDiskMode}
 
 	lastIndex := uint64(0)
 	for v := range w.Iterator() {
@@ -257,35 +235,21 @@ func (c *Wal) writeMessages(messages []msg) error {
 		return err
 	}
 
-	c.buf.Reset()
-	c.buf.Grow(len(messages) * 128) // small heuristic; avoids repeated growth on small/medium batches
-
-	for _, m := range messages {
-		if err := c.msgpackEnc.Encode(m); err != nil {
-			return errors.Wrap(err, "failed to encode msg")
-		}
-	}
-
-	if _, err := c.log.Write(c.buf.Bytes()); err != nil {
-		return errors.Wrap(err, "failed to write msg to log")
+	if err := c.activeSegment.Append(messages); err != nil {
+		return err
 	}
 
 	if c.isInSyncDiskMode {
-		if err := c.log.Sync(); err != nil {
+		if err := c.activeSegment.Sync(); err != nil {
 			return errors.Wrap(err, "failed to sync log")
 		}
-	}
-
-	c.lastOffset += int64(c.buf.Len())
-	for _, m := range messages {
-		c.tmpIndex[m.Idx] = m
 	}
 
 	return nil
 }
 
 func (c *Wal) record(index uint64) (msg, bool) {
-	if m, ok := c.tmpIndex[index]; ok {
+	if m, ok := c.activeSegment.Record(index); ok {
 		return m, true
 	}
 	if m, ok := c.index[index]; ok {
@@ -305,12 +269,12 @@ func (c *Wal) Iterator() iter.Seq[msg] {
 	return func(yield func(msg) bool) {
 		c.mu.RLock()
 
-		// collect indexes from both main index and tmpIndex
-		allIndexes := make(map[uint64]msg, len(c.index)+len(c.tmpIndex))
+		// collect indexes from both historical index and active segment
+		allIndexes := make(map[uint64]msg, len(c.index)+c.activeSegment.Len())
 		for k, v := range c.index {
 			allIndexes[k] = v
 		}
-		for k, v := range c.tmpIndex {
+		for k, v := range c.activeSegment.index {
 			allIndexes[k] = v
 		}
 
@@ -361,9 +325,13 @@ func (c *Wal) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if err := c.log.Close(); err != nil {
+	if err := c.activeSegment.Close(); err != nil {
 		return errors.Wrap(err, "failed to close log file")
 	}
 
 	return nil
+}
+
+func nextSegmentNumber(segmentsNumbers []int) int {
+	return segmentsNumbers[len(segmentsNumbers)-1] + 1
 }

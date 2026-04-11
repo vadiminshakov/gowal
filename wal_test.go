@@ -93,7 +93,7 @@ func TestLoadIndex(t *testing.T) {
 		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
 	}
 
-	index, err := loadIndexes(log.log)
+	index, err := loadIndexes(log.activeSegment.file)
 	require.NoError(t, err)
 
 	for i := 0; i < 10; i++ {
@@ -123,7 +123,7 @@ func TestSegmentRotation(t *testing.T) {
 	}
 
 	// load index of last segment
-	index, err := loadIndexes(log.log)
+	index, err := loadIndexes(log.activeSegment.file)
 	require.NoError(t, err)
 
 	// check
@@ -180,8 +180,10 @@ func TestServiceDownUpAndRepairIndex(t *testing.T) {
 
 	// check
 	for i := range segmentThreshold * 2 {
-		require.Equal(t, "key"+strconv.Itoa(i), log.index[uint64(i)].Key)
-		require.Equal(t, "value"+strconv.Itoa(i), string(log.index[uint64(i)].Value))
+		record, ok := log.record(uint64(i))
+		require.True(t, ok)
+		require.Equal(t, "key"+strconv.Itoa(i), record.Key)
+		require.Equal(t, "value"+strconv.Itoa(i), string(record.Value))
 	}
 
 	require.NoError(t, os.RemoveAll("./testlogdata"))
@@ -412,7 +414,7 @@ func TestWriteTombstone(t *testing.T) {
 		// verify record is removed from main index
 		log.mu.RLock()
 		_, existsInMainIndex := log.index[5]
-		_, existsInTmpIndex := log.tmpIndex[5]
+		_, existsInTmpIndex := log.activeSegment.index[5]
 		log.mu.RUnlock()
 
 		require.False(t, existsInMainIndex, "Record should be removed from main index")
@@ -470,7 +472,7 @@ func TestWriteBatch_RotateWhenTmpIndexAlreadyFull(t *testing.T) {
 	for i := 1; i <= segmentThreshold; i++ {
 		require.NoError(t, wal.Write(uint64(i), fmt.Sprintf("k%d", i), []byte("v")))
 	}
-	require.Equal(t, segmentThreshold, len(wal.tmpIndex))
+	require.Equal(t, segmentThreshold, wal.activeSegment.Len())
 
 	batch, err := NewBatch(
 		Record{Index: 10, Key: "k10", Value: []byte("v10")},
@@ -485,7 +487,7 @@ func TestWriteBatch_RotateWhenTmpIndexAlreadyFull(t *testing.T) {
 	}
 
 	for _, r := range batch.Records() {
-		_, ok := wal.tmpIndex[r.Index]
+		_, ok := wal.activeSegment.Record(r.Index)
 		require.True(t, ok)
 	}
 }
