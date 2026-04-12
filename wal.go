@@ -1,9 +1,9 @@
 package gowal
 
 import (
+	"bytes"
 	"iter"
 	"os"
-	"path"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -11,7 +11,10 @@ import (
 	"github.com/pkg/errors"
 )
 
-var ErrExists = errors.New("msg with such index already exists")
+var (
+	ErrExists             = errors.New("msg with such index already exists")
+	ErrNonSequentialIndex = errors.New("msg index must be next in sequence")
+)
 
 // Wal is a write-ahead log that stores key-value pairs.
 //
@@ -23,26 +26,9 @@ type Wal struct {
 	// mutex for thread safety
 	mu sync.RWMutex
 
-	// activeSegment is the segment that accepts new writes.
-	activeSegment *segment
-
-	// index stores messages from closed historical segments.
-	index map[uint64]msg
-
-	// path to directory with logs
-	pathToLogsDir string
+	segments *segmentSet
 
 	lastIndex atomic.Uint64
-
-	// nextSegmentNumber is the number that will be assigned to the next opened segment.
-	nextSegmentNumber int
-
-	// prefix for segment files
-	prefix string
-
-	segmentsThreshold int
-
-	maxSegments int
 
 	isInSyncDiskMode bool
 }
@@ -81,32 +67,14 @@ func NewWAL(config Config) (*Wal, error) {
 		return nil, errors.Wrap(err, "failed to create log directory")
 	}
 
-	segmentsNumbers, err := findSegmentNumber(config.Dir, config.Prefix)
+	segments, lastIndex, err := openSegmentSet(config)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to find segment numbers")
-	}
-
-	activeSegment, index, err := buildIndexAndOpenActiveSegment(segmentsNumbers, path.Join(config.Dir, config.Prefix))
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to load log segments")
+		return nil, err
 	}
 
 	w := &Wal{
-		activeSegment:     activeSegment,
-		index:             index,
-		pathToLogsDir:     config.Dir,
-		nextSegmentNumber: nextSegmentNumber(segmentsNumbers),
-		prefix:            config.Prefix,
-		segmentsThreshold: config.SegmentThreshold,
-		maxSegments:       config.MaxSegments,
-		isInSyncDiskMode:  config.IsInSyncDiskMode,
-	}
-
-	lastIndex := uint64(0)
-	for v := range w.Iterator() {
-		if v.Idx > lastIndex {
-			lastIndex = v.Idx
-		}
+		segments:         segments,
+		isInSyncDiskMode: config.IsInSyncDiskMode,
 	}
 
 	w.lastIndex.Store(lastIndex)
@@ -118,12 +86,13 @@ func NewWAL(config Config) (*Wal, error) {
 // It is unsafe because it removes all the segment and checksum files that are corrupted (checksums do not match).
 // It returns the list of segment and checksum files that were removed.
 func UnsafeRecover(dir, segmentPrefix string) ([]string, error) {
-	segmentsNumbers, err := findSegmentNumber(dir, segmentPrefix)
+	namer := segmentNamer{dir: dir, prefix: segmentPrefix}
+	segmentsNumbers, err := findSegmentNumbers(dir, namer)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to find segment numbers")
 	}
 
-	return removeCorruptedSegments(segmentsNumbers, path.Join(dir, segmentPrefix))
+	return removeCorruptedSegments(segmentsNumbers, namer)
 }
 
 // Get queries value at specific index in the log.
@@ -131,13 +100,13 @@ func (c *Wal) Get(index uint64) (string, []byte, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	msg, ok := c.record(index)
+	msg, ok := c.segments.record(index)
 	if ok {
 		// verify checksum on read
 		if err := msg.verifyChecksum(); err != nil {
 			return "", nil, err
 		}
-		return msg.Key, msg.Value, nil
+		return msg.Key, bytes.Clone(msg.Value), nil
 	}
 
 	return "", nil, nil
@@ -153,18 +122,22 @@ func (c *Wal) Write(index uint64, key string, value []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if _, exists := c.record(index); exists {
+	expectedIndex := c.lastIndex.Load() + 1
+	if index != expectedIndex {
+		return errors.Wrapf(ErrNonSequentialIndex, "expected index %d, got %d", expectedIndex, index)
+	}
+
+	if _, exists := c.segments.record(index); exists {
 		return ErrExists
 	}
 
-	m := msg{Key: key, Value: value, Idx: index}
-	m.Checksum = m.calculateChecksum()
+	m := newMsg(index, key, value)
 
 	if err := c.writeMessages([]msg{m}); err != nil {
 		return err
 	}
 
-	c.lastIndex.Add(1)
+	c.lastIndex.Store(index)
 	return nil
 }
 
@@ -174,18 +147,26 @@ func (c *Wal) WriteBatch(batch Batch) error {
 		return nil
 	}
 
+	if !batch.createdWithConstructor {
+		return errors.New("batch must be created with NewBatch constructor")
+	}
+
+	records := batch.Records()
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if err := c.checkExternalCollisions(batch); err != nil {
+	if err := batch.validateSequenceAfter(c.lastIndex.Load()); err != nil {
+		return err
+	}
+
+	if err := c.checkExternalCollisions(records); err != nil {
 		return err
 	}
 
 	messages := make([]msg, 0, batch.Len())
-	for _, r := range batch.Records() {
-		m := msg{Key: r.Key, Value: r.Value, Idx: r.Index}
-		m.Checksum = m.calculateChecksum()
-		messages = append(messages, m)
+	for _, r := range records {
+		messages = append(messages, newMsg(r.Index, r.Key, r.Value))
 	}
 
 	if err := c.writeMessages(messages); err != nil {
@@ -197,9 +178,9 @@ func (c *Wal) WriteBatch(batch Batch) error {
 	return nil
 }
 
-func (c *Wal) checkExternalCollisions(batch Batch) error {
-	for _, record := range batch.Records() {
-		if _, exists := c.record(record.Index); exists {
+func (c *Wal) checkExternalCollisions(records []Record) error {
+	for _, record := range records {
+		if _, exists := c.segments.record(record.Index); exists {
 			return ErrExists
 		}
 	}
@@ -213,49 +194,34 @@ func (c *Wal) WriteTombstone(index uint64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	existingMsg, ok := c.record(index)
+	existingMsg, ok := c.segments.record(index)
 	if !ok {
 		return nil
 	}
 
-	tombstone := msg{Key: existingMsg.Key, Value: []byte("tombstone"), Idx: index}
-	tombstone.Checksum = tombstone.calculateChecksum()
+	tombstone := newTombstone(existingMsg)
 
 	if err := c.writeMessages([]msg{tombstone}); err != nil {
 		return err
 	}
 
-	delete(c.index, index)
+	c.segments.forgetHistorical(index)
 	return nil
 }
 
 // writeMessages is an internal method that encodes and writes messages to the log.
 func (c *Wal) writeMessages(messages []msg) error {
-	if err := c.rotateIfNeeded(); err != nil {
-		return err
-	}
-
-	if err := c.activeSegment.Append(messages); err != nil {
+	if err := c.segments.append(messages); err != nil {
 		return err
 	}
 
 	if c.isInSyncDiskMode {
-		if err := c.activeSegment.Sync(); err != nil {
+		if err := c.segments.syncActive(); err != nil {
 			return errors.Wrap(err, "failed to sync log")
 		}
 	}
 
 	return nil
-}
-
-func (c *Wal) record(index uint64) (msg, bool) {
-	if m, ok := c.activeSegment.Record(index); ok {
-		return m, true
-	}
-	if m, ok := c.index[index]; ok {
-		return m, true
-	}
-	return msg{}, false
 }
 
 // Iterator returns push-based iterator for the WAL messages.
@@ -269,25 +235,7 @@ func (c *Wal) Iterator() iter.Seq[msg] {
 	return func(yield func(msg) bool) {
 		c.mu.RLock()
 
-		// collect indexes from both historical index and active segment
-		allIndexes := make(map[uint64]msg, len(c.index)+c.activeSegment.Len())
-		for k, v := range c.index {
-			allIndexes[k] = v
-		}
-		for k, v := range c.activeSegment.index {
-			allIndexes[k] = v
-		}
-
-		msgIndexes := make([]uint64, 0, len(allIndexes))
-		for k := range allIndexes {
-			msgIndexes = append(msgIndexes, k)
-		}
-
-		// create a copy of messages to avoid holding lock during iteration
-		msgs := make([]msg, len(msgIndexes))
-		for i, idx := range msgIndexes {
-			msgs[i] = allIndexes[idx]
-		}
+		msgs := c.segments.records()
 		c.mu.RUnlock()
 
 		slices.SortFunc(msgs, func(a, b msg) int {
@@ -325,13 +273,9 @@ func (c *Wal) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if err := c.activeSegment.Close(); err != nil {
+	if err := c.segments.close(); err != nil {
 		return errors.Wrap(err, "failed to close log file")
 	}
 
 	return nil
-}
-
-func nextSegmentNumber(segmentsNumbers []int) int {
-	return segmentsNumbers[len(segmentsNumbers)-1] + 1
 }

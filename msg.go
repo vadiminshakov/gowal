@@ -1,6 +1,7 @@
 package gowal
 
 import (
+	"bytes"
 	"fmt"
 	"hash/crc32"
 )
@@ -10,6 +11,28 @@ type msg struct {
 	Key      string
 	Value    []byte
 	Checksum uint32
+}
+
+func newMsg(index uint64, key string, value []byte) msg {
+	m := msg{Idx: index, Key: key, Value: bytes.Clone(value)}
+	m.Checksum = m.calculateChecksum()
+	return m
+}
+
+func newTombstone(existing msg) msg {
+	return newMsg(existing.Idx, existing.Key, []byte("tombstone"))
+}
+
+func (m msg) clone() msg {
+	m.Value = bytes.Clone(m.Value)
+	return m
+}
+
+func (m msg) sameRecord(other msg) bool {
+	return m.Idx == other.Idx &&
+		m.Key == other.Key &&
+		m.Checksum == other.Checksum &&
+		bytes.Equal(m.Value, other.Value)
 }
 
 func (m msg) Index() uint64 {
