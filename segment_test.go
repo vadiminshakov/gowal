@@ -69,3 +69,19 @@ func TestSegmentLoadCorruptedSegmentReturnsError(t *testing.T) {
 	_, err = openSegment(seg.Path())
 	require.Error(t, err)
 }
+
+func TestSegmentNamerParsesConfiguredPrefix(t *testing.T) {
+	namer := segmentNamer{dir: t.TempDir(), prefix: "wal_segment_"}
+
+	number, ok, err := namer.parse("wal_segment_42")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, segmentNumber(42), number)
+
+	_, ok, err = namer.parse("other_42")
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	_, _, err = namer.parse("wal_segment_bad")
+	require.Error(t, err)
+}
