@@ -40,14 +40,14 @@ defer wal.Close()
 ```
 
 ### Adding a log entry
-You can append a new log entry by providing an index, a key, and a value:
+You can append a new log entry by providing an index, a key, and a value. Indexes start at `1` and must increase monotonically with each write:
 ```go
 err := wal.Write(1, "myKey", []byte("myValue"))
 if err != nil {
     log.Fatal(err)
 }
 ```
-If the entry with the same index already exists, the function will return an error.
+If the index does not continue the monotonic sequence, the function will return an error.
 
 ### Retrieving a log entry
 
@@ -114,7 +114,7 @@ Data is split into numbered files (`segment_0`, `segment_1`, etc.). Internally, 
 - **historical index**: Main in-memory index for all closed segments. Provides fast lookups across historical data.
 
 #### Write Flow
-1. Check if index already exists (prevents duplicates)
+1. Check that the index continues the monotonic sequence
 2. Check if rotation is needed based on `SegmentThreshold`
 3. Calculate CRC32 checksum for the record
 4. Serialize record (with checksum) using MessagePack
