@@ -16,14 +16,13 @@ func TestSegmentAppendAddsRecordsToIndex(t *testing.T) {
 
 	require.Equal(t, segmentPath(dir, "log_", 0), seg.Path())
 
-	message := msg{Idx: 1, Key: "key1", Value: []byte("value1")}
-	message.Checksum = message.calculateChecksum()
+	record := newRecord(1, "key1", []byte("value1"))
 
-	require.NoError(t, seg.Append([]msg{message}))
+	require.NoError(t, seg.Append([]Record{record}))
 
-	record, ok := seg.Record(1)
+	got, ok := seg.Record(1)
 	require.True(t, ok)
-	require.Equal(t, message, record)
+	require.Equal(t, record, got)
 	require.Equal(t, 1, seg.Len())
 }
 
@@ -33,19 +32,18 @@ func TestOpenSegmentLoadsIndexFromExistingFile(t *testing.T) {
 	seg, err := openSegment(segmentPath(dir, "log_", 0))
 	require.NoError(t, err)
 
-	message := msg{Idx: 1, Key: "key1", Value: []byte("value1")}
-	message.Checksum = message.calculateChecksum()
+	record := newRecord(1, "key1", []byte("value1"))
 
-	require.NoError(t, seg.Append([]msg{message}))
+	require.NoError(t, seg.Append([]Record{record}))
 	require.NoError(t, seg.Close())
 
 	loadedSegment, err := openSegment(segmentPath(dir, "log_", 0))
 	require.NoError(t, err)
 	defer loadedSegment.Close()
 
-	record, ok := loadedSegment.Record(1)
+	got, ok := loadedSegment.Record(1)
 	require.True(t, ok)
-	require.Equal(t, message, record)
+	require.Equal(t, record, got)
 }
 
 func TestSegmentLoadCorruptedSegmentReturnsError(t *testing.T) {
@@ -54,10 +52,9 @@ func TestSegmentLoadCorruptedSegmentReturnsError(t *testing.T) {
 	seg, err := openSegment(segmentPath(dir, "log_", 0))
 	require.NoError(t, err)
 
-	message := msg{Idx: 1, Key: "key1", Value: []byte("value1")}
-	message.Checksum = message.calculateChecksum()
+	record := newRecord(1, "key1", []byte("value1"))
 
-	require.NoError(t, seg.Append([]msg{message}))
+	require.NoError(t, seg.Append([]Record{record}))
 	require.NoError(t, seg.Close())
 
 	file, err := os.OpenFile(seg.Path(), os.O_APPEND|os.O_WRONLY, 0644)

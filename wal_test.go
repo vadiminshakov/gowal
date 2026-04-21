@@ -62,6 +62,29 @@ func TestWriteCopiesValue(t *testing.T) {
 	require.Equal(t, []byte("value"), gotAgain)
 }
 
+func TestIteratorCopiesValue(t *testing.T) {
+	dir := t.TempDir()
+	log, err := NewWAL(Config{
+		Dir:              dir,
+		Prefix:           "log_",
+		SegmentThreshold: 10,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
+	require.NoError(t, err)
+	defer log.Close()
+
+	require.NoError(t, log.Write(1, "key", []byte("value")))
+
+	for record := range log.Iterator() {
+		record.Value[0] = 'X'
+	}
+
+	_, got, err := log.Get(1)
+	require.NoError(t, err)
+	require.Equal(t, []byte("value"), got)
+}
+
 func TestWriteRequiresSequentialIndexStartingAtOne(t *testing.T) {
 	dir := t.TempDir()
 	log, err := NewWAL(Config{
@@ -149,13 +172,13 @@ func TestIterator(t *testing.T) {
 
 		i := 1
 		for {
-			msg, ok := iter()
+			record, ok := iter()
 			if !ok {
 				break
 			}
 
-			require.Equal(t, "key"+strconv.Itoa(i), msg.Key)
-			require.Equal(t, "value"+strconv.Itoa(i), string(msg.Value))
+			require.Equal(t, "key"+strconv.Itoa(i), record.Key)
+			require.Equal(t, "value"+strconv.Itoa(i), string(record.Value))
 			i++
 		}
 	})
@@ -213,8 +236,8 @@ func TestSegmentRotation(t *testing.T) {
 	// check
 	indexValues := slices.Collect(maps.Values(index))
 
-	slices.SortFunc(indexValues, func(a, b msg) int {
-		return cmp.Compare(a.Idx, b.Idx)
+	slices.SortFunc(indexValues, func(a, b Record) int {
+		return cmp.Compare(a.Index, b.Index)
 	})
 
 	for i, v := range indexValues {
@@ -530,10 +553,10 @@ func TestWriteTombstone(t *testing.T) {
 
 		// check iterator contains tombstone
 		found := false
-		for msg := range log.Iterator() {
-			if msg.Idx == 3 {
-				require.Equal(t, "key3", msg.Key)
-				require.Equal(t, "tombstone", string(msg.Value))
+		for record := range log.Iterator() {
+			if record.Index == 3 {
+				require.Equal(t, "key3", record.Key)
+				require.Equal(t, "tombstone", string(record.Value))
 				found = true
 			}
 		}
@@ -543,11 +566,10 @@ func TestWriteTombstone(t *testing.T) {
 	t.Run("WriteTombstone overwrites record from main index", func(t *testing.T) {
 		// simulate having a record in main index by manually adding it
 		// (this simulates the case where record was persisted to main index)
-		m := msg{Key: "key5", Value: []byte("value5"), Idx: 5}
-		m.Checksum = m.calculateChecksum()
+		record := newRecord(5, "key5", []byte("value5"))
 		log.mu.Lock()
-		log.segments.historicalIndex[5] = m
-		log.segments.historicalIndexBySegment[0] = map[uint64]msg{5: m}
+		log.segments.historicalIndex[5] = record
+		log.segments.historicalIndexBySegment[0] = map[uint64]Record{5: record}
 		log.mu.Unlock()
 
 		// verify record exists in main index

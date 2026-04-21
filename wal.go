@@ -12,8 +12,8 @@ import (
 )
 
 var (
-	ErrExists             = errors.New("msg with such index already exists")
-	ErrNonSequentialIndex = errors.New("msg index must be next in sequence")
+	ErrExists             = errors.New("record with such index already exists")
+	ErrNonSequentialIndex = errors.New("record index must be next in sequence")
 )
 
 // Wal is a write-ahead log that stores key-value pairs.
@@ -49,16 +49,6 @@ type Config struct {
 
 	// IsInSyncDiskMode indicates whether the log should be synced to disk after each write.
 	IsInSyncDiskMode bool
-}
-
-// Record is a struct that represents a record in the log.
-type Record struct {
-	// Index is the unique index of the record for fast search.
-	Index uint64
-	// Key is the unique key of the record.
-	Key string
-	// Value is the value of the record.
-	Value []byte
 }
 
 // NewWAL creates a new WAL with the given configuration.
@@ -100,13 +90,13 @@ func (c *Wal) Get(index uint64) (string, []byte, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	msg, ok := c.segments.record(index)
+	record, ok := c.segments.record(index)
 	if ok {
 		// verify checksum on read
-		if err := msg.verifyChecksum(); err != nil {
+		if err := record.verifyChecksum(); err != nil {
 			return "", nil, err
 		}
-		return msg.Key, bytes.Clone(msg.Value), nil
+		return record.Key, bytes.Clone(record.Value), nil
 	}
 
 	return "", nil, nil
@@ -127,13 +117,13 @@ func (c *Wal) Write(index uint64, key string, value []byte) error {
 		return errors.Wrapf(ErrNonSequentialIndex, "expected index %d, got %d", expectedIndex, index)
 	}
 
-	if _, exists := c.segments.record(index); exists {
-		return ErrExists
+	record := newRecord(index, key, value)
+	
+	if err := c.checkIndexExists(record); err != nil {
+		return err
 	}
 
-	m := newMsg(index, key, value)
-
-	if err := c.writeMessages([]msg{m}); err != nil {
+	if err := c.writeRecords([]Record{record}); err != nil {
 		return err
 	}
 
@@ -160,16 +150,16 @@ func (c *Wal) WriteBatch(batch Batch) error {
 		return err
 	}
 
-	if err := c.checkExternalCollisions(records); err != nil {
+	if err := c.checkIndexExists(records...); err != nil {
 		return err
 	}
 
-	messages := make([]msg, 0, batch.Len())
+	recordsToWrite := make([]Record, 0, batch.Len())
 	for _, r := range records {
-		messages = append(messages, newMsg(r.Index, r.Key, r.Value))
+		recordsToWrite = append(recordsToWrite, newRecord(r.Index, r.Key, r.Value))
 	}
 
-	if err := c.writeMessages(messages); err != nil {
+	if err := c.writeRecords(recordsToWrite); err != nil {
 		return err
 	}
 
@@ -178,7 +168,7 @@ func (c *Wal) WriteBatch(batch Batch) error {
 	return nil
 }
 
-func (c *Wal) checkExternalCollisions(records []Record) error {
+func (c *Wal) checkIndexExists(records ...Record) error {
 	for _, record := range records {
 		if _, exists := c.segments.record(record.Index); exists {
 			return ErrExists
@@ -194,14 +184,14 @@ func (c *Wal) WriteTombstone(index uint64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	existingMsg, ok := c.segments.record(index)
+	existingRecord, ok := c.segments.record(index)
 	if !ok {
 		return nil
 	}
 
-	tombstone := newTombstone(existingMsg)
+	tombstone := newTombstone(existingRecord)
 
-	if err := c.writeMessages([]msg{tombstone}); err != nil {
+	if err := c.writeRecords([]Record{tombstone}); err != nil {
 		return err
 	}
 
@@ -209,9 +199,9 @@ func (c *Wal) WriteTombstone(index uint64) error {
 	return nil
 }
 
-// writeMessages is an internal method that encodes and writes messages to the log.
-func (c *Wal) writeMessages(messages []msg) error {
-	if err := c.segments.append(messages); err != nil {
+// writeRecords is an internal method that encodes and writes records to the log.
+func (c *Wal) writeRecords(records []Record) error {
+	if err := c.segments.append(records); err != nil {
 		return err
 	}
 
@@ -224,47 +214,47 @@ func (c *Wal) writeMessages(messages []msg) error {
 	return nil
 }
 
-// Iterator returns push-based iterator for the WAL messages.
-// Messages are returned from the oldest to the newest.
+// Iterator returns push-based iterator for the WAL records.
+// Records are returned from the oldest to the newest.
 //
 // Should be used like this:
 //
-//	for msg := range wal.Iterator() {
+//	for record := range wal.Iterator() {
 //		...
-func (c *Wal) Iterator() iter.Seq[msg] {
-	return func(yield func(msg) bool) {
+func (c *Wal) Iterator() iter.Seq[Record] {
+	return func(yield func(Record) bool) {
 		c.mu.RLock()
 
-		msgs := c.segments.records()
+		records := c.segments.records()
 		c.mu.RUnlock()
 
-		slices.SortFunc(msgs, func(a, b msg) int {
-			if a.Idx < b.Idx {
+		slices.SortFunc(records, func(a, b Record) int {
+			if a.Index < b.Index {
 				return -1
 			}
-			if a.Idx > b.Idx {
+			if a.Index > b.Index {
 				return 1
 			}
 			return 0
 		})
 
-		for _, msg := range msgs {
-			if !yield(msg) {
+		for _, record := range records {
+			if !yield(record) {
 				break
 			}
 		}
 	}
 }
 
-// PullIterator returns pull-based iterator for the WAL messages.
-// Messages are returned from the oldest to the newest.
+// PullIterator returns pull-based iterator for the WAL records.
+// Records are returned from the oldest to the newest.
 //
 // Should be used like this:
 //
 //	next, stop := wal.PullIterator()
 //	defer stop()
 //	...
-func (c *Wal) PullIterator() (next func() (msg, bool), stop func()) {
+func (c *Wal) PullIterator() (next func() (Record, bool), stop func()) {
 	return iter.Pull(c.Iterator())
 }
 

@@ -12,7 +12,7 @@ import (
 type segment struct {
 	path    string
 	file    *os.File
-	index   map[uint64]msg
+	index   map[uint64]Record
 	lastIdx uint64
 	buf     bytes.Buffer
 	encoder *msgpack.Encoder
@@ -41,24 +41,24 @@ func openSegment(segmentPath string) (*segment, error) {
 	return s, nil
 }
 
-func (s *segment) Append(messages []msg) error {
+func (s *segment) Append(records []Record) error {
 	s.buf.Reset()
-	s.buf.Grow(len(messages) * 128) // small heuristic; avoids repeated growth on small/medium batches
+	s.buf.Grow(len(records) * 128) // small heuristic; avoids repeated growth on small/medium batches
 
-	for _, m := range messages {
-		if err := s.encoder.Encode(m); err != nil {
-			return errors.Wrap(err, "failed to encode msg")
+	for _, record := range records {
+		if err := s.encoder.Encode(record); err != nil {
+			return errors.Wrap(err, "failed to encode record")
 		}
 	}
 
 	if _, err := s.file.Write(s.buf.Bytes()); err != nil {
-		return errors.Wrap(err, "failed to write msg to log")
+		return errors.Wrap(err, "failed to write record to log")
 	}
 
-	for _, m := range messages {
-		s.index[m.Idx] = m
-		if m.Idx > s.lastIdx {
-			s.lastIdx = m.Idx
+	for _, record := range records {
+		s.index[record.Index] = record
+		if record.Index > s.lastIdx {
+			s.lastIdx = record.Index
 		}
 	}
 
@@ -81,39 +81,39 @@ func (s *segment) LastIndex() uint64 {
 	return s.lastIdx
 }
 
-func (s *segment) Record(index uint64) (msg, bool) {
-	m, ok := s.index[index]
-	return m.clone(), ok
+func (s *segment) Record(index uint64) (Record, bool) {
+	record, ok := s.index[index]
+	return record.clone(), ok
 }
 
 func (s *segment) Path() string {
 	return s.path
 }
 
-func loadSegmentIndex(file *os.File) (map[uint64]msg, uint64, error) {
+func loadSegmentIndex(file *os.File) (map[uint64]Record, uint64, error) {
 	file.Seek(0, io.SeekStart)
 
-	index := make(map[uint64]msg)
+	index := make(map[uint64]Record)
 	var lastIndex uint64
 	dec := msgpack.NewDecoder(file)
 
 	for {
-		var msgIndexed msg
-		if err := dec.Decode(&msgIndexed); err != nil {
+		var record Record
+		if err := dec.Decode(&record); err != nil {
 			if err == io.EOF {
 				break
 			}
-			return nil, 0, errors.Wrap(err, "failed to decode indexed msg from log")
+			return nil, 0, errors.Wrap(err, "failed to decode indexed record from log")
 		}
 
-		// verify checksum for each loaded message
-		if err := msgIndexed.verifyChecksum(); err != nil {
-			return nil, 0, errors.Wrapf(err, "corrupted message at index %d", msgIndexed.Idx)
+		// verify checksum for each loaded record
+		if err := record.verifyChecksum(); err != nil {
+			return nil, 0, errors.Wrapf(err, "corrupted record at index %d", record.Index)
 		}
 
-		index[msgIndexed.Idx] = msgIndexed
-		if msgIndexed.Idx > lastIndex {
-			lastIndex = msgIndexed.Idx
+		index[record.Index] = record
+		if record.Index > lastIndex {
+			lastIndex = record.Index
 		}
 	}
 

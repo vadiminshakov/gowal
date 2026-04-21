@@ -67,8 +67,8 @@ if err != nil {
 You can iterate over all log entries using the `Iterator` function:
 
 ```go
-for msg := range wal.Iterator() {
-    log.Printf("Key: %s, Value: %s\n", msg.Key, string(msg.Value))
+for record := range wal.Iterator() {
+    log.Printf("Key: %s, Value: %s\n", record.Key, string(record.Value))
 }
 ```
 

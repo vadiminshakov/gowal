@@ -11,8 +11,8 @@ type segmentSet struct {
 	namer                    segmentNamer
 	active                   *segment
 	activeNumber             segmentNumber
-	historicalIndex          map[uint64]msg
-	historicalIndexBySegment map[segmentNumber]map[uint64]msg
+	historicalIndex          map[uint64]Record
+	historicalIndexBySegment map[segmentNumber]map[uint64]Record
 	numbers                  []segmentNumber
 	next                     segmentNumber
 	threshold                int
@@ -45,17 +45,17 @@ func openSegmentSet(config Config) (*segmentSet, uint64, error) {
 	}, lastIndex, nil
 }
 
-func openSegments(numbers []segmentNumber, namer segmentNamer) (*segment, map[uint64]msg, map[segmentNumber]map[uint64]msg, uint64, error) {
-	historical := make(map[uint64]msg)
-	historicalBySegment := make(map[segmentNumber]map[uint64]msg)
-	
+func openSegments(numbers []segmentNumber, namer segmentNamer) (*segment, map[uint64]Record, map[segmentNumber]map[uint64]Record, uint64, error) {
+	historical := make(map[uint64]Record)
+	historicalBySegment := make(map[segmentNumber]map[uint64]Record)
+
 	var lastIndex uint64
 	var active *segment
 
 	for i, number := range numbers {
 		s, err := openSegment(namer.path(number))
 		if err != nil {
-			return nil, nil, nil, 0, errors.Wrap(err, "failed to load indexes from msg log file")
+			return nil, nil, nil, 0, errors.Wrap(err, "failed to load indexes from record log file")
 		}
 		if s.LastIndex() > lastIndex {
 			lastIndex = s.LastIndex()
@@ -64,7 +64,7 @@ func openSegments(numbers []segmentNumber, namer segmentNamer) (*segment, map[ui
 		if i < len(numbers)-1 {
 			maps.Copy(historical, s.index)
 			historicalBySegment[number] = s.index
-			
+
 			if err := s.Close(); err != nil {
 				return nil, nil, nil, 0, errors.Wrap(err, "failed to close historical segment")
 			}
@@ -78,12 +78,12 @@ func openSegments(numbers []segmentNumber, namer segmentNamer) (*segment, map[ui
 	return active, historical, historicalBySegment, lastIndex, nil
 }
 
-func (s *segmentSet) append(messages []msg) error {
+func (s *segmentSet) append(records []Record) error {
 	if err := s.rotateIfNeeded(); err != nil {
 		return err
 	}
 
-	if err := s.active.Append(messages); err != nil {
+	if err := s.active.Append(records); err != nil {
 		return err
 	}
 
@@ -98,24 +98,24 @@ func (s *segmentSet) close() error {
 	return s.active.Close()
 }
 
-func (s *segmentSet) record(index uint64) (msg, bool) {
-	if m, ok := s.active.Record(index); ok {
-		return m, true
+func (s *segmentSet) record(index uint64) (Record, bool) {
+	if record, ok := s.active.Record(index); ok {
+		return record, true
 	}
-	if m, ok := s.historicalIndex[index]; ok {
-		return m.clone(), true
+	if record, ok := s.historicalIndex[index]; ok {
+		return record.clone(), true
 	}
-	return msg{}, false
+	return Record{}, false
 }
 
-func (s *segmentSet) records() []msg {
-	all := make(map[uint64]msg, len(s.historicalIndex)+s.active.Len())
+func (s *segmentSet) records() []Record {
+	all := make(map[uint64]Record, len(s.historicalIndex)+s.active.Len())
 	maps.Copy(all, s.historicalIndex)
 	maps.Copy(all, s.active.index)
 
-	records := make([]msg, 0, len(all))
-	for _, m := range all {
-		records = append(records, m.clone())
+	records := make([]Record, 0, len(all))
+	for _, record := range all {
+		records = append(records, record.clone())
 	}
 
 	return records
