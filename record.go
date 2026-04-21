@@ -11,7 +11,7 @@ import (
 type Record struct {
 	Index uint64
 	Key string
-=	Value []byte
+	Value []byte
 
 	checksum uint32
 }
