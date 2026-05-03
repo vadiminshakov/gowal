@@ -23,14 +23,14 @@ func TestWriteAndGet(t *testing.T) {
 	require.NoError(t, err)
 
 	for i := 1; i <= 10; i++ {
-		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+		require.NoError(t, log.Write(NewRecord(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i)))))
 	}
 
 	for i := 1; i <= 10; i++ {
-		key, value, err := log.Get(uint64(i))
+		record, err := log.Get(uint64(i))
 		require.NoError(t, err)
-		require.Equal(t, "key"+strconv.Itoa(i), key)
-		require.Equal(t, "value"+strconv.Itoa(i), string(value))
+		require.Equal(t, "key"+strconv.Itoa(i), record.Key)
+		require.Equal(t, "value"+strconv.Itoa(i), string(record.Value))
 	}
 
 	require.NoError(t, os.RemoveAll("./testlogdata"))
@@ -49,17 +49,17 @@ func TestWriteCopiesValue(t *testing.T) {
 	defer log.Close()
 
 	value := []byte("value")
-	require.NoError(t, log.Write(1, "key", value))
+	require.NoError(t, log.Write(NewRecord(1, "key", value)))
 	value[0] = 'X'
 
-	_, got, err := log.Get(1)
+	got, err := log.Get(1)
 	require.NoError(t, err)
-	require.Equal(t, []byte("value"), got)
+	require.Equal(t, []byte("value"), got.Value)
 
-	got[0] = 'Y'
-	_, gotAgain, err := log.Get(1)
+	got.Value[0] = 'Y'
+	gotAgain, err := log.Get(1)
 	require.NoError(t, err)
-	require.Equal(t, []byte("value"), gotAgain)
+	require.Equal(t, []byte("value"), gotAgain.Value)
 }
 
 func TestIteratorCopiesValue(t *testing.T) {
@@ -74,15 +74,15 @@ func TestIteratorCopiesValue(t *testing.T) {
 	require.NoError(t, err)
 	defer log.Close()
 
-	require.NoError(t, log.Write(1, "key", []byte("value")))
+	require.NoError(t, log.Write(NewRecord(1, "key", []byte("value"))))
 
 	for record := range log.Iterator() {
 		record.Value[0] = 'X'
 	}
 
-	_, got, err := log.Get(1)
+	got, err := log.Get(1)
 	require.NoError(t, err)
-	require.Equal(t, []byte("value"), got)
+	require.Equal(t, []byte("value"), got.Value)
 }
 
 func TestWriteRequiresSequentialIndexStartingAtOne(t *testing.T) {
@@ -97,16 +97,16 @@ func TestWriteRequiresSequentialIndexStartingAtOne(t *testing.T) {
 	require.NoError(t, err)
 	defer log.Close()
 
-	require.ErrorIs(t, log.Write(0, "key0", []byte("value0")), ErrNonSequentialIndex)
+	require.ErrorIs(t, log.Write(NewRecord(0, "key0", []byte("value0"))), ErrNonSequentialIndex)
 	require.Equal(t, uint64(0), log.CurrentIndex())
 
-	require.NoError(t, log.Write(1, "key1", []byte("value1")))
+	require.NoError(t, log.Write(NewRecord(1, "key1", []byte("value1"))))
 	require.Equal(t, uint64(1), log.CurrentIndex())
 
-	require.ErrorIs(t, log.Write(3, "key3", []byte("value3")), ErrNonSequentialIndex)
+	require.ErrorIs(t, log.Write(NewRecord(3, "key3", []byte("value3"))), ErrNonSequentialIndex)
 	require.Equal(t, uint64(1), log.CurrentIndex())
 
-	require.NoError(t, log.Write(2, "key2", []byte("value2")))
+	require.NoError(t, log.Write(NewRecord(2, "key2", []byte("value2"))))
 	require.Equal(t, uint64(2), log.CurrentIndex())
 }
 
@@ -121,12 +121,11 @@ func TestCurrentIndexTracksSequentialBatch(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	batch, err := NewBatch(
-		Record{Index: 1, Key: "key1", Value: []byte("value1")},
-		Record{Index: 2, Key: "key2", Value: []byte("value2")},
-		Record{Index: 3, Key: "key3", Value: []byte("value3")},
+	batch := NewBatch(
+		NewRecord(1, "key1", []byte("value1")),
+		NewRecord(2, "key2", []byte("value2")),
+		NewRecord(3, "key3", []byte("value3")),
 	)
-	require.NoError(t, err)
 	require.NoError(t, log.WriteBatch(batch))
 	require.Equal(t, uint64(3), log.CurrentIndex())
 	require.NoError(t, log.Close())
@@ -154,7 +153,7 @@ func TestIterator(t *testing.T) {
 	require.NoError(t, err)
 
 	for i := 1; i <= 10; i++ {
-		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+		require.NoError(t, log.Write(NewRecord(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i)))))
 	}
 
 	t.Run("Iterator", func(t *testing.T) {
@@ -197,7 +196,7 @@ func TestLoadIndex(t *testing.T) {
 	require.NoError(t, err)
 
 	for i := 1; i <= 10; i++ {
-		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+		require.NoError(t, log.Write(NewRecord(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i)))))
 	}
 
 	index, _, err := loadSegmentIndex(log.segments.active.file)
@@ -226,7 +225,7 @@ func TestSegmentRotation(t *testing.T) {
 
 	// here we exceed the segment size threshold (segmentThreshold) and write 10 more log entries to the new segment
 	for i := 1; i <= segmentThreshold*segmentsNumber+10; i++ {
-		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+		require.NoError(t, log.Write(NewRecord(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i)))))
 	}
 
 	// load index of last segment
@@ -270,12 +269,12 @@ func TestServiceDownUpAndRepairIndex(t *testing.T) {
 
 	// create first segment
 	for i := 1; i <= segmentThreshold; i++ {
-		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+		require.NoError(t, log.Write(NewRecord(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i)))))
 	}
 
 	// create second segment
 	for i := segmentThreshold + 1; i <= segmentThreshold*2; i++ {
-		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+		require.NoError(t, log.Write(NewRecord(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i)))))
 	}
 
 	// close the wal
@@ -315,7 +314,7 @@ func TestRotationAfterRestartWithMissingOldSegment(t *testing.T) {
 	require.NoError(t, err)
 
 	for i := 1; i <= 8; i++ {
-		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+		require.NoError(t, log.Write(NewRecord(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i)))))
 	}
 	require.NoError(t, log.Close())
 	require.NoError(t, os.Remove(segmentPath(dir, "log_", 0)))
@@ -325,7 +324,7 @@ func TestRotationAfterRestartWithMissingOldSegment(t *testing.T) {
 	defer log.Close()
 
 	for i := 9; i <= 10; i++ {
-		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+		require.NoError(t, log.Write(NewRecord(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i)))))
 	}
 
 	require.NoFileExists(t, segmentPath(dir, "log_", 0))
@@ -350,8 +349,8 @@ func TestCurrentIndexDoesNotRegressWhenActiveSegmentHasOnlyOldTombstone(t *testi
 	log, err := open()
 	require.NoError(t, err)
 
-	require.NoError(t, log.Write(1, "key1", []byte("value1")))
-	require.NoError(t, log.Write(2, "key2", []byte("value2")))
+	require.NoError(t, log.Write(NewRecord(1, "key1", []byte("value1"))))
+	require.NoError(t, log.Write(NewRecord(2, "key2", []byte("value2"))))
 	require.NoError(t, log.WriteTombstone(1))
 	require.Equal(t, uint64(2), log.CurrentIndex())
 	require.NoError(t, log.Close())
@@ -361,7 +360,7 @@ func TestCurrentIndexDoesNotRegressWhenActiveSegmentHasOnlyOldTombstone(t *testi
 	defer log.Close()
 
 	require.Equal(t, uint64(2), log.CurrentIndex())
-	require.NoError(t, log.Write(3, "key3", []byte("value3")))
+	require.NoError(t, log.Write(NewRecord(3, "key3", []byte("value3"))))
 }
 
 func TestChecksum(t *testing.T) {
@@ -375,15 +374,15 @@ func TestChecksum(t *testing.T) {
 	require.NoError(t, err)
 
 	for i := 1; i <= 2; i++ {
-		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+		require.NoError(t, log.Write(NewRecord(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i)))))
 	}
 
 	// verify data can be read correctly (checksums verified on read)
 	for i := 1; i <= 2; i++ {
-		key, value, err := log.Get(uint64(i))
+		record, err := log.Get(uint64(i))
 		require.NoError(t, err)
-		require.Equal(t, "key"+strconv.Itoa(i), key)
-		require.Equal(t, []byte("value"+strconv.Itoa(i)), value)
+		require.Equal(t, "key"+strconv.Itoa(i), record.Key)
+		require.Equal(t, []byte("value"+strconv.Itoa(i)), record.Value)
 	}
 
 	require.NoError(t, os.RemoveAll("./testlogdata"))
@@ -400,7 +399,7 @@ func TestChecksum_Corrupted(t *testing.T) {
 	require.NoError(t, err)
 
 	for i := 1; i <= 2; i++ {
-		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+		require.NoError(t, log.Write(NewRecord(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i)))))
 	}
 
 	// close and re-open to test corruption detection
@@ -436,15 +435,15 @@ func TestChecksum_Check_Segment_Files(t *testing.T) {
 	require.NoError(t, err)
 
 	for i := 1; i <= 5; i++ {
-		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+		require.NoError(t, log.Write(NewRecord(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i)))))
 	}
 
 	// verify all data can be read correctly (checksums verified on read)
 	for i := 1; i <= 5; i++ {
-		key, value, err := log.Get(uint64(i))
+		record, err := log.Get(uint64(i))
 		require.NoError(t, err)
-		require.Equal(t, "key"+strconv.Itoa(i), key)
-		require.Equal(t, []byte("value"+strconv.Itoa(i)), value)
+		require.Equal(t, "key"+strconv.Itoa(i), record.Key)
+		require.Equal(t, []byte("value"+strconv.Itoa(i)), record.Value)
 	}
 
 	// find all segment files (no more separate checksum files)
@@ -475,7 +474,7 @@ func TestChecksum_UnsafeRecover(t *testing.T) {
 	require.NoError(t, err)
 
 	for i := 1; i <= 10; i++ {
-		require.NoError(t, log.Write(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i))))
+		require.NoError(t, log.Write(NewRecord(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i)))))
 	}
 
 	// close and corrupt the data by writing some garbage to the segment file
@@ -510,41 +509,41 @@ func TestWriteTombstone(t *testing.T) {
 		require.NoError(t, err)
 
 		// verify record doesn't exist
-		key, value, err := log.Get(999)
+		record, err := log.Get(999)
 		require.NoError(t, err)
-		require.Equal(t, "", key)
-		require.Nil(t, value)
+		require.Equal(t, "", record.Key)
+		require.Nil(t, record.Value)
 	})
 
 	t.Run("WriteTombstone for existing record", func(t *testing.T) {
 		// write a record
-		err := log.Write(1, "key1", []byte("value1"))
+		err := log.Write(NewRecord(1, "key1", []byte("value1")))
 		require.NoError(t, err)
 
 		// verify record exists
-		key, value, err := log.Get(1)
+		record, err := log.Get(1)
 		require.NoError(t, err)
-		require.Equal(t, "key1", key)
-		require.Equal(t, "value1", string(value))
+		require.Equal(t, "key1", record.Key)
+		require.Equal(t, "value1", string(record.Value))
 
 		// write tombstone
 		err = log.WriteTombstone(1)
 		require.NoError(t, err)
 
 		// verify tombstone exists with same key
-		key, value, err = log.Get(1)
+		record, err = log.Get(1)
 		require.NoError(t, err)
-		require.Equal(t, "key1", key)
-		require.Equal(t, "tombstone", string(value))
+		require.Equal(t, "key1", record.Key)
+		require.Equal(t, "tombstone", string(record.Value))
 	})
 
 	t.Run("WriteTombstone appears in iterator", func(t *testing.T) {
 		// write some records
-		err := log.Write(2, "key2", []byte("value2"))
+		err := log.Write(NewRecord(2, "key2", []byte("value2")))
 		require.NoError(t, err)
-		err = log.Write(3, "key3", []byte("value3"))
+		err = log.Write(NewRecord(3, "key3", []byte("value3")))
 		require.NoError(t, err)
-		err = log.Write(4, "key4", []byte("value4"))
+		err = log.Write(NewRecord(4, "key4", []byte("value4")))
 		require.NoError(t, err)
 
 		// write tombstone for one of them
@@ -566,27 +565,27 @@ func TestWriteTombstone(t *testing.T) {
 	t.Run("WriteTombstone overwrites record from main index", func(t *testing.T) {
 		// simulate having a record in main index by manually adding it
 		// (this simulates the case where record was persisted to main index)
-		record := newRecord(5, "key5", []byte("value5"))
+		record := NewRecord(5, "key5", []byte("value5"))
 		log.mu.Lock()
 		log.segments.historicalIndex[5] = record
 		log.segments.historicalIndexBySegment[0] = map[uint64]Record{5: record}
 		log.mu.Unlock()
 
 		// verify record exists in main index
-		key, value, err := log.Get(5)
+		record, err := log.Get(5)
 		require.NoError(t, err)
-		require.Equal(t, "key5", key)
-		require.Equal(t, "value5", string(value))
+		require.Equal(t, "key5", record.Key)
+		require.Equal(t, "value5", string(record.Value))
 
 		// write tombstone
 		err = log.WriteTombstone(5)
 		require.NoError(t, err)
 
 		// verify tombstone overwrites the record
-		key, value, err = log.Get(5)
+		record, err = log.Get(5)
 		require.NoError(t, err)
-		require.Equal(t, "key5", key)
-		require.Equal(t, "tombstone", string(value))
+		require.Equal(t, "key5", record.Key)
+		require.Equal(t, "tombstone", string(record.Value))
 
 		// verify record is removed from main index
 		log.mu.RLock()
@@ -611,12 +610,11 @@ func TestWriteBatchAcceptsUnsortedSequentialRecords(t *testing.T) {
 	require.NoError(t, err)
 	defer wal.Close()
 
-	batch, err := NewBatch(
-		Record{Index: 3, Key: "key3", Value: []byte("value3")},
-		Record{Index: 1, Key: "key1", Value: []byte("value1")},
-		Record{Index: 2, Key: "key2", Value: []byte("value2")},
+	batch := NewBatch(
+		NewRecord(3, "key3", []byte("value3")),
+		NewRecord(1, "key1", []byte("value1")),
+		NewRecord(2, "key2", []byte("value2")),
 	)
-	require.NoError(t, err)
 	require.NoError(t, wal.WriteBatch(batch))
 	require.Equal(t, uint64(3), wal.CurrentIndex())
 }
@@ -633,13 +631,12 @@ func TestWriteBatch_NonSequentialWithCurrentIndex(t *testing.T) {
 	require.NoError(t, err)
 
 	// Write a single entry first
-	require.NoError(t, wal.Write(1, "initial", []byte("value")))
+	require.NoError(t, wal.Write(NewRecord(1, "initial", []byte("value"))))
 
-	batch, err := NewBatch(
-		Record{Index: 3, Key: "key3", Value: []byte("value3")},
-		Record{Index: 4, Key: "key4", Value: []byte("value4")},
+	batch := NewBatch(
+		NewRecord(3, "key3", []byte("value3")),
+		NewRecord(4, "key4", []byte("value4")),
 	)
-	require.NoError(t, err)
 
 	err = wal.WriteBatch(batch)
 	require.ErrorIs(t, err, ErrNonSequentialIndex, "expected ErrNonSequentialIndex for a skipped index")
@@ -660,15 +657,14 @@ func TestWriteBatch_RotateWhenTmpIndexAlreadyFull(t *testing.T) {
 	defer wal.Close()
 
 	for i := 1; i <= segmentThreshold; i++ {
-		require.NoError(t, wal.Write(uint64(i), fmt.Sprintf("k%d", i), []byte("v")))
+		require.NoError(t, wal.Write(NewRecord(uint64(i), fmt.Sprintf("k%d", i), []byte("v"))))
 	}
 	require.Equal(t, segmentThreshold, wal.segments.active.Len())
 
-	batch, err := NewBatch(
-		Record{Index: 4, Key: "k4", Value: []byte("v4")},
-		Record{Index: 5, Key: "k5", Value: []byte("v5")},
+	batch := NewBatch(
+		NewRecord(4, "k4", []byte("v4")),
+		NewRecord(5, "k5", []byte("v5")),
 	)
-	require.NoError(t, err)
 	require.NoError(t, wal.WriteBatch(batch))
 
 	for i := 1; i <= segmentThreshold; i++ {

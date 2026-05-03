@@ -16,7 +16,7 @@ func TestSegmentAppendAddsRecordsToIndex(t *testing.T) {
 
 	require.Equal(t, segmentPath(dir, "log_", 0), seg.Path())
 
-	record := newRecord(1, "key1", []byte("value1"))
+	record := NewRecord(1, "key1", []byte("value1"))
 
 	require.NoError(t, seg.Append([]Record{record}))
 
@@ -32,7 +32,7 @@ func TestOpenSegmentLoadsIndexFromExistingFile(t *testing.T) {
 	seg, err := openSegment(segmentPath(dir, "log_", 0))
 	require.NoError(t, err)
 
-	record := newRecord(1, "key1", []byte("value1"))
+	record := NewRecord(1, "key1", []byte("value1"))
 
 	require.NoError(t, seg.Append([]Record{record}))
 	require.NoError(t, seg.Close())
@@ -52,7 +52,7 @@ func TestSegmentLoadCorruptedSegmentReturnsError(t *testing.T) {
 	seg, err := openSegment(segmentPath(dir, "log_", 0))
 	require.NoError(t, err)
 
-	record := newRecord(1, "key1", []byte("value1"))
+	record := NewRecord(1, "key1", []byte("value1"))
 
 	require.NoError(t, seg.Append([]Record{record}))
 	require.NoError(t, seg.Close())
