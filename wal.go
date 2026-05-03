@@ -1,7 +1,6 @@
 package gowal
 
 import (
-	"bytes"
 	"iter"
 	"os"
 	"slices"
@@ -85,8 +84,8 @@ func UnsafeRecover(dir, segmentPrefix string) ([]string, error) {
 	return removeCorruptedSegments(segmentsNumbers, namer)
 }
 
-// Get queries value at specific index in the log.
-func (c *Wal) Get(index uint64) (string, []byte, error) {
+// Get queries record at specific index in the log.
+func (c *Wal) Get(index uint64) (Record, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -94,12 +93,12 @@ func (c *Wal) Get(index uint64) (string, []byte, error) {
 	if ok {
 		// verify checksum on read
 		if err := record.verifyChecksum(); err != nil {
-			return "", nil, err
+			return Record{}, err
 		}
-		return record.Key, bytes.Clone(record.Value), nil
+		return record.clone(), nil
 	}
 
-	return "", nil, nil
+	return Record{}, nil
 }
 
 // CurrentIndex returns current index of the log.
@@ -107,18 +106,18 @@ func (c *Wal) CurrentIndex() uint64 {
 	return c.lastIndex.Load()
 }
 
-// Write writes key-value pair to the log.
-func (c *Wal) Write(index uint64, key string, value []byte) error {
+// Write writes record to the log.
+func (c *Wal) Write(record Record) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	expectedIndex := c.lastIndex.Load() + 1
-	if index != expectedIndex {
-		return errors.Wrapf(ErrNonSequentialIndex, "expected index %d, got %d", expectedIndex, index)
+	if record.Index != expectedIndex {
+		return errors.Wrapf(ErrNonSequentialIndex, "expected index %d, got %d", expectedIndex, record.Index)
 	}
 
-	record := newRecord(index, key, value)
-	
+	record = NewRecord(record.Index, record.Key, record.Value)
+
 	if err := c.checkIndexExists(record); err != nil {
 		return err
 	}
@@ -127,7 +126,7 @@ func (c *Wal) Write(index uint64, key string, value []byte) error {
 		return err
 	}
 
-	c.lastIndex.Store(index)
+	c.lastIndex.Store(record.Index)
 	return nil
 }
 
@@ -137,11 +136,10 @@ func (c *Wal) WriteBatch(batch Batch) error {
 		return nil
 	}
 
-	if !batch.createdWithConstructor {
-		return errors.New("batch must be created with NewBatch constructor")
+	batch.sort()
+	if err := batch.validate(); err != nil {
+		return err
 	}
-
-	records := batch.Records()
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -150,13 +148,13 @@ func (c *Wal) WriteBatch(batch Batch) error {
 		return err
 	}
 
-	if err := c.checkIndexExists(records...); err != nil {
+	if err := c.checkIndexExists(batch.records...); err != nil {
 		return err
 	}
 
 	recordsToWrite := make([]Record, 0, batch.Len())
-	for _, r := range records {
-		recordsToWrite = append(recordsToWrite, newRecord(r.Index, r.Key, r.Value))
+	for _, r := range batch.records {
+		recordsToWrite = append(recordsToWrite, NewRecord(r.Index, r.Key, r.Value))
 	}
 
 	if err := c.writeRecords(recordsToWrite); err != nil {
