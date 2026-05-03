@@ -6,19 +6,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewBatchDuplicateIndexes(t *testing.T) {
-	_, err := NewBatch(
-		Record{Index: 1, Key: "key1", Value: []byte("v1")},
-		Record{Index: 1, Key: "key1-dup", Value: []byte("v1-dup")},
+func TestBatchValidateDuplicateIndexes(t *testing.T) {
+	batch := NewBatch(
+		NewRecord(1, "key1", []byte("v1")),
+		NewRecord(1, "key1-dup", []byte("v1-dup")),
 	)
+	err := batch.validate()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "duplicate index", "Expected error for duplicate index")
 }
 
 func TestBatchCopiesRecords(t *testing.T) {
 	value := []byte("value")
-	batch, err := NewBatch(Record{Index: 1, Key: "key", Value: value})
-	require.NoError(t, err)
+	batch := NewBatch(NewRecord(1, "key", value))
 
 	value[0] = 'X'
 	records := batch.Records()
@@ -28,13 +28,13 @@ func TestBatchCopiesRecords(t *testing.T) {
 	require.Equal(t, []byte("value"), batch.Records()[0].Value)
 }
 
-func TestNewBatchSortsRecordsByIndex(t *testing.T) {
-	batch, err := NewBatch(
-		Record{Index: 3, Key: "key3", Value: []byte("value3")},
-		Record{Index: 1, Key: "key1", Value: []byte("value1")},
-		Record{Index: 2, Key: "key2", Value: []byte("value2")},
+func TestBatchSortsRecordsByIndex(t *testing.T) {
+	batch := NewBatch(
+		NewRecord(3, "key3", []byte("value3")),
+		NewRecord(1, "key1", []byte("value1")),
+		NewRecord(2, "key2", []byte("value2")),
 	)
-	require.NoError(t, err)
+	batch.sort()
 
 	records := batch.Records()
 	require.Equal(t, uint64(1), records[0].Index)
@@ -43,21 +43,21 @@ func TestNewBatchSortsRecordsByIndex(t *testing.T) {
 }
 
 func TestBatchValidateSequenceAfter(t *testing.T) {
-	batch, err := NewBatch(
-		Record{Index: 3, Key: "key3", Value: []byte("value3")},
-		Record{Index: 4, Key: "key4", Value: []byte("value4")},
-		Record{Index: 5, Key: "key5", Value: []byte("value5")},
+	batch := NewBatch(
+		NewRecord(3, "key3", []byte("value3")),
+		NewRecord(4, "key4", []byte("value4")),
+		NewRecord(5, "key5", []byte("value5")),
 	)
-	require.NoError(t, err)
 	require.NoError(t, batch.validateSequenceAfter(2))
 	require.ErrorIs(t, batch.validateSequenceAfter(1), ErrNonSequentialIndex)
 }
 
-func TestNewBatchRejectsGaps(t *testing.T) {
-	_, err := NewBatch(
-		Record{Index: 1, Key: "key1", Value: []byte("value1")},
-		Record{Index: 3, Key: "key3", Value: []byte("value3")},
+func TestBatchValidateRejectsGaps(t *testing.T) {
+	batch := NewBatch(
+		NewRecord(1, "key1", []byte("value1")),
+		NewRecord(3, "key3", []byte("value3")),
 	)
+	err := batch.validate()
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrNonSequentialIndex)
 	require.Contains(t, err.Error(), "key1")

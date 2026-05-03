@@ -8,19 +8,12 @@ import (
 
 // Batch is a collection of records to be written atomically.
 type Batch struct {
-	records                []Record
-	createdWithConstructor bool
+	records []Record
 }
 
 // NewBatch creates a new Batch from the given records.
-func NewBatch(records ...Record) (Batch, error) {
-	b := Batch{records: cloneRecords(records), createdWithConstructor: true}
-	b.sort()
-	if err := b.validate(); err != nil {
-		return Batch{}, err
-	}
-
-	return b, nil
+func NewBatch(records ...Record) Batch {
+	return Batch{records: cloneRecords(records)}
 }
 
 // Records returns the records in the batch.
