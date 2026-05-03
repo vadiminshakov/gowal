@@ -23,14 +23,14 @@ type recordWire struct {
 	Checksum uint32
 }
 
-func newRecord(index uint64, key string, value []byte) Record {
+func NewRecord(index uint64, key string, value []byte) Record {
 	r := Record{Index: index, Key: key, Value: bytes.Clone(value)}
 	r.checksum = r.calculateChecksum()
 	return r
 }
 
 func newTombstone(existing Record) Record {
-	return newRecord(existing.Index, existing.Key, []byte("tombstone"))
+	return NewRecord(existing.Index, existing.Key, []byte("tombstone"))
 }
 
 func (r Record) clone() Record {
