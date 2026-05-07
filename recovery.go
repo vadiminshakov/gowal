@@ -24,18 +24,12 @@ func removeCorruptedSegments(numbers []segmentNumber, namer segmentNamer) ([]str
 }
 
 func handleCorruptedSegment(segmentPath string) (bool, error) {
-	file, err := os.OpenFile(segmentPath, os.O_RDONLY, 0644)
-	if err != nil {
-		return false, errors.Wrap(err, "failed to open segment file")
-	}
-	defer file.Close()
-
-	statFd, err := file.Stat()
+	info, err := os.Stat(segmentPath)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to stat segment file")
 	}
 
-	if statFd.Size() == 0 {
+	if info.Size() == 0 {
 		if err := os.Remove(segmentPath); err != nil {
 			return false, errors.Wrap(err, "failed to remove empty segment")
 		}
@@ -43,7 +37,9 @@ func handleCorruptedSegment(segmentPath string) (bool, error) {
 		return true, nil
 	}
 
-	if _, _, err = loadSegmentIndex(file); err == nil {
+	seg, err := openSegment(segmentPath)
+	if err == nil {
+		_ = seg.Close()
 		return false, nil
 	}
 

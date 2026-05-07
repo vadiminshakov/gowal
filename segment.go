@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/pkg/errors"
-	msgpack "github.com/vmihailenco/msgpack/v5"
 )
 
 type segment struct {
@@ -15,7 +14,7 @@ type segment struct {
 	index   map[uint64]Record
 	lastIdx uint64
 	buf     bytes.Buffer
-	encoder *msgpack.Encoder
+	codec   codec
 }
 
 func openSegment(segmentPath string) (*segment, error) {
@@ -24,31 +23,34 @@ func openSegment(segmentPath string) (*segment, error) {
 		return nil, errors.Wrap(err, "failed to open log segment file")
 	}
 
-	index, lastIndex, err := loadSegmentIndex(file)
+	s := &segment{
+		path:  segmentPath,
+		file:  file,
+		codec: codec{},
+	}
+
+	index, lastIndex, err := s.loadIndex()
 	if err != nil {
 		_ = file.Close()
 		return nil, errors.Wrap(err, "failed to build index from log segment")
 	}
 
-	s := &segment{
-		path:    segmentPath,
-		file:    file,
-		index:   index,
-		lastIdx: lastIndex,
-	}
-	s.encoder = msgpack.NewEncoder(&s.buf)
+	s.index = index
+	s.lastIdx = lastIndex
 
 	return s, nil
 }
 
 func (s *segment) Append(records []Record) error {
 	s.buf.Reset()
-	s.buf.Grow(len(records) * 128) // small heuristic; avoids repeated growth on small/medium batches
+	s.buf.Grow(len(records) * 150)
 
 	for _, record := range records {
-		if err := s.encoder.Encode(record); err != nil {
-			return errors.Wrap(err, "failed to encode record")
+		frame, err := s.codec.marshal(record)
+		if err != nil {
+			return errors.Wrap(err, "failed to marshal record")
 		}
+		s.buf.Write(frame)
 	}
 
 	if _, err := s.file.Write(s.buf.Bytes()); err != nil {
@@ -90,25 +92,19 @@ func (s *segment) Path() string {
 	return s.path
 }
 
-func loadSegmentIndex(file *os.File) (map[uint64]Record, uint64, error) {
-	file.Seek(0, io.SeekStart)
+func (s *segment) loadIndex() (map[uint64]Record, uint64, error) {
+	s.file.Seek(0, io.SeekStart)
 
 	index := make(map[uint64]Record)
 	var lastIndex uint64
-	dec := msgpack.NewDecoder(file)
 
 	for {
-		var record Record
-		if err := dec.Decode(&record); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return nil, 0, errors.Wrap(err, "failed to decode indexed record from log")
+		record, err := s.codec.unmarshal(s.file)
+		if err == io.EOF {
+			break
 		}
-
-		// verify checksum for each loaded record
-		if err := record.verifyChecksum(); err != nil {
-			return nil, 0, errors.Wrapf(err, "corrupted record at index %d", record.Index)
+		if err != nil {
+			return nil, 0, errors.Wrap(err, "failed to decode record from log")
 		}
 
 		index[record.Index] = record

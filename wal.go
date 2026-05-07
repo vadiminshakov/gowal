@@ -72,8 +72,8 @@ func NewWAL(config Config) (*Wal, error) {
 }
 
 // UnsafeRecover recovers the WAL from the given directory.
-// It is unsafe because it removes all the segment and checksum files that are corrupted (checksums do not match).
-// It returns the list of segment and checksum files that were removed.
+// It is unsafe because it removes all the corrupted segment files (invalid frame trailer or checksum mismatch).
+// It returns the list of segment files that were removed.
 func UnsafeRecover(dir, segmentPrefix string) ([]string, error) {
 	namer := segmentNamer{dir: dir, prefix: segmentPrefix}
 	segmentsNumbers, err := findSegmentNumbers(dir, namer)
@@ -91,10 +91,6 @@ func (c *Wal) Get(index uint64) (Record, error) {
 
 	record, ok := c.segments.record(index)
 	if ok {
-		// verify checksum on read
-		if err := record.verifyChecksum(); err != nil {
-			return Record{}, err
-		}
 		return record.clone(), nil
 	}
 

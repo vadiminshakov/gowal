@@ -199,7 +199,7 @@ func TestLoadIndex(t *testing.T) {
 		require.NoError(t, log.Write(NewRecord(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i)))))
 	}
 
-	index, _, err := loadSegmentIndex(log.segments.active.file)
+	index, _, err := log.segments.active.loadIndex()
 	require.NoError(t, err)
 
 	for i := 1; i <= 10; i++ {
@@ -229,7 +229,7 @@ func TestSegmentRotation(t *testing.T) {
 	}
 
 	// load index of last segment
-	index, _, err := loadSegmentIndex(log.segments.active.file)
+	index, _, err := log.segments.active.loadIndex()
 	require.NoError(t, err)
 
 	// check
