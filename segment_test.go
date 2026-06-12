@@ -1,6 +1,7 @@
 package gowal
 
 import (
+	"encoding/binary"
 	"os"
 	"testing"
 
@@ -81,4 +82,17 @@ func TestSegmentNamerParsesConfiguredPrefix(t *testing.T) {
 
 	_, _, err = namer.parse("wal_segment_bad")
 	require.Error(t, err)
+}
+
+func TestOpenSegmentRejectsOversizedFrameLength(t *testing.T) {
+	dir := t.TempDir()
+	segPath := segmentPath(dir, "log_", 0)
+
+	var hdr [frameHeaderSize]byte
+	binary.BigEndian.PutUint32(hdr[4:8], maxFrameDataSize+1)
+	require.NoError(t, os.WriteFile(segPath, hdr[:], 0644))
+
+	_, err := openSegment(segPath)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "frame data too large")
 }

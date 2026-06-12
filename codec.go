@@ -13,6 +13,7 @@ const (
 	frameTrailer     uint32 = 0xDEADC0DE
 	frameHeaderSize  int    = 8 // CRC32(4) + Length(4)
 	frameTrailerSize int    = 4
+	maxFrameDataSize uint32 = 16 * 1024 * 1024 // 16 MiB
 )
 
 type codec struct{}
@@ -21,6 +22,9 @@ func (codec) marshal(r Record) ([]byte, error) {
 	data, err := msgpack.Marshal(r)
 	if err != nil {
 		return nil, err
+	}
+	if len(data) > int(maxFrameDataSize) {
+		return nil, fmt.Errorf("frame data too large: %d > %d", len(data), maxFrameDataSize)
 	}
 
 	frame := make([]byte, frameHeaderSize+len(data)+frameTrailerSize)
@@ -43,6 +47,9 @@ func (codec) unmarshal(r io.Reader) (Record, error) {
 
 	wantCRC := binary.BigEndian.Uint32(hdr[0:4])
 	dataLen := binary.BigEndian.Uint32(hdr[4:8])
+	if dataLen > maxFrameDataSize {
+		return Record{}, fmt.Errorf("frame data too large: %d > %d", dataLen, maxFrameDataSize)
+	}
 
 	data := make([]byte, dataLen)
 	if _, err := io.ReadFull(r, data); err != nil {

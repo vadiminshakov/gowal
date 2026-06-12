@@ -136,7 +136,7 @@ func (s *segmentSet) forgetHistorical(index uint64) {
 }
 
 func (s *segmentSet) rotateIfNeeded() error {
-	if s.active.Len() < s.threshold {
+	if s.active.Entries() < s.threshold {
 		return nil
 	}
 

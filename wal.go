@@ -132,24 +132,25 @@ func (c *Wal) WriteBatch(batch Batch) error {
 		return nil
 	}
 
-	batch.sort()
-	if err := batch.validate(); err != nil {
+	workingBatch := Batch{records: batch.Records()}
+	workingBatch.sort()
+	if err := workingBatch.validate(); err != nil {
 		return err
 	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if err := batch.validateSequenceAfter(c.lastIndex.Load()); err != nil {
+	if err := workingBatch.validateSequenceAfter(c.lastIndex.Load()); err != nil {
 		return err
 	}
 
-	if err := c.checkIndexExists(batch.records...); err != nil {
+	if err := c.checkIndexExists(workingBatch.records...); err != nil {
 		return err
 	}
 
-	recordsToWrite := make([]Record, 0, batch.Len())
-	for _, r := range batch.records {
+	recordsToWrite := make([]Record, 0, workingBatch.Len())
+	for _, r := range workingBatch.records {
 		recordsToWrite = append(recordsToWrite, NewRecord(r.Index, r.Key, r.Value))
 	}
 

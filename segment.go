@@ -13,6 +13,7 @@ type segment struct {
 	file    *os.File
 	index   map[uint64]Record
 	lastIdx uint64
+	entries int
 	buf     bytes.Buffer
 	codec   codec
 }
@@ -29,7 +30,7 @@ func openSegment(segmentPath string) (*segment, error) {
 		codec: codec{},
 	}
 
-	index, lastIndex, err := s.loadIndex()
+	index, lastIndex, entries, err := s.loadIndex()
 	if err != nil {
 		_ = file.Close()
 		return nil, errors.Wrap(err, "failed to build index from log segment")
@@ -37,6 +38,7 @@ func openSegment(segmentPath string) (*segment, error) {
 
 	s.index = index
 	s.lastIdx = lastIndex
+	s.entries = entries
 
 	return s, nil
 }
@@ -63,6 +65,7 @@ func (s *segment) Append(records []Record) error {
 			s.lastIdx = record.Index
 		}
 	}
+	s.entries += len(records)
 
 	return nil
 }
@@ -79,6 +82,10 @@ func (s *segment) Len() int {
 	return len(s.index)
 }
 
+func (s *segment) Entries() int {
+	return s.entries
+}
+
 func (s *segment) LastIndex() uint64 {
 	return s.lastIdx
 }
@@ -92,11 +99,14 @@ func (s *segment) Path() string {
 	return s.path
 }
 
-func (s *segment) loadIndex() (map[uint64]Record, uint64, error) {
-	s.file.Seek(0, io.SeekStart)
+func (s *segment) loadIndex() (map[uint64]Record, uint64, int, error) {
+	if _, err := s.file.Seek(0, io.SeekStart); err != nil {
+		return nil, 0, 0, errors.Wrap(err, "failed to seek segment file")
+	}
 
 	index := make(map[uint64]Record)
 	var lastIndex uint64
+	var entries int
 
 	for {
 		record, err := s.codec.unmarshal(s.file)
@@ -104,14 +114,15 @@ func (s *segment) loadIndex() (map[uint64]Record, uint64, error) {
 			break
 		}
 		if err != nil {
-			return nil, 0, errors.Wrap(err, "failed to decode record from log")
+			return nil, 0, 0, errors.Wrap(err, "failed to decode record from log")
 		}
 
 		index[record.Index] = record
+		entries++
 		if record.Index > lastIndex {
 			lastIndex = record.Index
 		}
 	}
 
-	return index, lastIndex, nil
+	return index, lastIndex, entries, nil
 }

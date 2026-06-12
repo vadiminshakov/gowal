@@ -199,7 +199,7 @@ func TestLoadIndex(t *testing.T) {
 		require.NoError(t, log.Write(NewRecord(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i)))))
 	}
 
-	index, _, err := log.segments.active.loadIndex()
+	index, _, _, err := log.segments.active.loadIndex()
 	require.NoError(t, err)
 
 	for i := 1; i <= 10; i++ {
@@ -229,7 +229,7 @@ func TestSegmentRotation(t *testing.T) {
 	}
 
 	// load index of last segment
-	index, _, err := log.segments.active.loadIndex()
+	index, _, _, err := log.segments.active.loadIndex()
 	require.NoError(t, err)
 
 	// check
@@ -676,4 +676,52 @@ func TestWriteBatch_RotateWhenTmpIndexAlreadyFull(t *testing.T) {
 		_, ok := wal.segments.active.Record(r.Index)
 		require.True(t, ok)
 	}
+}
+
+func TestWriteBatchDoesNotMutateInputBatch(t *testing.T) {
+	dir := t.TempDir()
+	wal, err := NewWAL(Config{
+		Dir:              dir,
+		Prefix:           "log_",
+		SegmentThreshold: 10,
+		MaxSegments:      5,
+		IsInSyncDiskMode: false,
+	})
+	require.NoError(t, err)
+	defer wal.Close()
+
+	batch := NewBatch(
+		NewRecord(3, "key3", []byte("value3")),
+		NewRecord(1, "key1", []byte("value1")),
+		NewRecord(2, "key2", []byte("value2")),
+	)
+
+	require.NoError(t, wal.WriteBatch(batch))
+
+	records := batch.Records()
+	require.Equal(t, []uint64{3, 1, 2}, []uint64{records[0].Index, records[1].Index, records[2].Index})
+}
+
+func TestRotationThresholdCountsAppendedRecords(t *testing.T) {
+	dir := t.TempDir()
+	wal, err := NewWAL(Config{
+		Dir:              dir,
+		Prefix:           "log_",
+		SegmentThreshold: 2,
+		MaxSegments:      10,
+		IsInSyncDiskMode: false,
+	})
+	require.NoError(t, err)
+	defer wal.Close()
+
+	require.NoError(t, wal.Write(NewRecord(1, "key1", []byte("value1"))))
+	require.NoError(t, wal.Write(NewRecord(2, "key2", []byte("value2"))))
+
+	require.NoError(t, wal.WriteTombstone(1))
+	require.NoError(t, wal.WriteTombstone(1))
+	require.NoError(t, wal.WriteTombstone(1))
+
+	require.FileExists(t, segmentPath(dir, "log_", 0))
+	require.FileExists(t, segmentPath(dir, "log_", 1))
+	require.FileExists(t, segmentPath(dir, "log_", 2))
 }
