@@ -1,0 +1,20 @@
+wal_test.go
+  s_cf7ed1a853eb7e::t_88730c68f8edf9 818-846
+  s_cf7ed1a853eb7e::t_a8ce3674b877f0 739,747,764,782,801,814
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "47de00dc6f556189847ae9d9b960df35fcde0a39",
+  "prompts": {},
+  "sessions": {
+    "s_cf7ed1a853eb7e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a42c2ef-28d8-47e4-9afd-a691e8b5dff9",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Vadim Inshakov <vadiminshakov@gmail.com>"
+    }
+  }
+}
