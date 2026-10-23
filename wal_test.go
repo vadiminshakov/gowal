@@ -726,14 +726,100 @@ func TestRotationThresholdCountsAppendedRecords(t *testing.T) {
 	require.FileExists(t, segmentPath(dir, "log_", 2))
 }
 
-func tornTailConfig(dir string, threshold int) Config {
-	return Config{Dir: dir, Prefix: "log_", SegmentThreshold: threshold, IsInSyncDiskMode: true}
+func TestOpenTruncatesPartialLastFrame(t *testing.T) {
+	dir := t.TempDir()
+	path := segmentPath(dir, "log_", 0)
+	writeRecords(t, dir, 100, 3)
+	validSize := fileSize(t, path)
+
+	frame, err := codec{}.marshal(NewRecord(4, "key", []byte("value")))
+	require.NoError(t, err)
+	appendToSegment(t, path, frame[:len(frame)/2])
+
+	log, err := NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), log.CurrentIndex())
+	require.Equal(t, validSize, fileSize(t, path))
+
+	require.NoError(t, log.Write(NewRecord(4, "key", []byte("value"))))
+	require.NoError(t, log.Close())
+
+	log, err = NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
+	require.NoError(t, err)
+	defer log.Close()
+	require.Equal(t, uint64(4), log.CurrentIndex())
+	record, err := log.Get(4)
+	require.NoError(t, err)
+	require.Equal(t, NewRecord(4, "key", []byte("value")), record)
+}
+
+func TestOpenTruncatesZeroFilledTail(t *testing.T) {
+	dir := t.TempDir()
+	path := segmentPath(dir, "log_", 0)
+	writeRecords(t, dir, 100, 3)
+	validSize := fileSize(t, path)
+
+	appendToSegment(t, path, make([]byte, 64))
+
+	log, err := NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
+	require.NoError(t, err)
+	defer log.Close()
+	require.Equal(t, uint64(3), log.CurrentIndex())
+	require.Equal(t, validSize, fileSize(t, path))
+}
+
+func TestOpenTruncatesBrokenFrameAtEOF(t *testing.T) {
+	dir := t.TempDir()
+	path := segmentPath(dir, "log_", 0)
+	writeRecords(t, dir, 100, 2)
+	validSize := fileSize(t, path)
+
+	frame, err := codec{}.marshal(NewRecord(3, "key", []byte("value")))
+	require.NoError(t, err)
+	frame[frameHeaderSize] ^= 0xFF
+	appendToSegment(t, path, frame)
+
+	log, err := NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
+	require.NoError(t, err)
+	defer log.Close()
+	require.Equal(t, uint64(2), log.CurrentIndex())
+	require.Equal(t, validSize, fileSize(t, path))
+}
+
+func TestOpenFailsOnCorruptionInTheMiddle(t *testing.T) {
+	dir := t.TempDir()
+	path := segmentPath(dir, "log_", 0)
+	writeRecords(t, dir, 100, 3)
+
+	frame, err := codec{}.marshal(NewRecord(1, "key", []byte("value")))
+	require.NoError(t, err)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	data[len(frame)+frameHeaderSize] ^= 0xFF // payload of the second frame
+	require.NoError(t, os.WriteFile(path, data, 0644))
+
+	_, err = NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "checksum mismatch")
+	require.Equal(t, int64(len(data)), fileSize(t, path))
+}
+
+func TestOpenFailsOnTornTailInNotLastSegment(t *testing.T) {
+	dir := t.TempDir()
+	path := segmentPath(dir, "log_", 0)
+	writeRecords(t, dir, 2, 3)
+
+	require.NoError(t, os.Truncate(path, fileSize(t, path)-1))
+
+	_, err := NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 2, IsInSyncDiskMode: true})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "partial frame")
 }
 
 func writeRecords(t *testing.T, dir string, threshold int, count uint64) {
 	t.Helper()
 
-	log, err := NewWAL(tornTailConfig(dir, threshold))
+	log, err := NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: threshold, IsInSyncDiskMode: true})
 	require.NoError(t, err)
 	for i := uint64(1); i <= count; i++ {
 		require.NoError(t, log.Write(NewRecord(i, "key", []byte("value"))))
@@ -757,94 +843,4 @@ func fileSize(t *testing.T, path string) int64 {
 	info, err := os.Stat(path)
 	require.NoError(t, err)
 	return info.Size()
-}
-
-func TestOpenTruncatesPartialLastFrame(t *testing.T) {
-	dir := t.TempDir()
-	path := segmentPath(dir, "log_", 0)
-	writeRecords(t, dir, 100, 3)
-	validSize := fileSize(t, path)
-
-	frame, err := codec{}.marshal(NewRecord(4, "key", []byte("value")))
-	require.NoError(t, err)
-	appendToSegment(t, path, frame[:len(frame)/2])
-
-	log, err := NewWAL(tornTailConfig(dir, 100))
-	require.NoError(t, err)
-	require.Equal(t, uint64(3), log.CurrentIndex())
-	require.Equal(t, validSize, fileSize(t, path))
-
-	require.NoError(t, log.Write(NewRecord(4, "key", []byte("value"))))
-	require.NoError(t, log.Close())
-
-	log, err = NewWAL(tornTailConfig(dir, 100))
-	require.NoError(t, err)
-	defer log.Close()
-	require.Equal(t, uint64(4), log.CurrentIndex())
-	record, err := log.Get(4)
-	require.NoError(t, err)
-	require.Equal(t, NewRecord(4, "key", []byte("value")), record)
-}
-
-func TestOpenTruncatesZeroFilledTail(t *testing.T) {
-	dir := t.TempDir()
-	path := segmentPath(dir, "log_", 0)
-	writeRecords(t, dir, 100, 3)
-	validSize := fileSize(t, path)
-
-	appendToSegment(t, path, make([]byte, 64))
-
-	log, err := NewWAL(tornTailConfig(dir, 100))
-	require.NoError(t, err)
-	defer log.Close()
-	require.Equal(t, uint64(3), log.CurrentIndex())
-	require.Equal(t, validSize, fileSize(t, path))
-}
-
-func TestOpenTruncatesBrokenFrameAtEOF(t *testing.T) {
-	dir := t.TempDir()
-	path := segmentPath(dir, "log_", 0)
-	writeRecords(t, dir, 100, 2)
-	validSize := fileSize(t, path)
-
-	frame, err := codec{}.marshal(NewRecord(3, "key", []byte("value")))
-	require.NoError(t, err)
-	frame[frameHeaderSize] ^= 0xFF
-	appendToSegment(t, path, frame)
-
-	log, err := NewWAL(tornTailConfig(dir, 100))
-	require.NoError(t, err)
-	defer log.Close()
-	require.Equal(t, uint64(2), log.CurrentIndex())
-	require.Equal(t, validSize, fileSize(t, path))
-}
-
-func TestOpenFailsOnCorruptionInTheMiddle(t *testing.T) {
-	dir := t.TempDir()
-	path := segmentPath(dir, "log_", 0)
-	writeRecords(t, dir, 100, 3)
-
-	frame, err := codec{}.marshal(NewRecord(1, "key", []byte("value")))
-	require.NoError(t, err)
-	data, err := os.ReadFile(path)
-	require.NoError(t, err)
-	data[len(frame)+frameHeaderSize] ^= 0xFF // payload of the second frame
-	require.NoError(t, os.WriteFile(path, data, 0644))
-
-	_, err = NewWAL(tornTailConfig(dir, 100))
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "checksum mismatch")
-	require.Equal(t, int64(len(data)), fileSize(t, path))
-}
-
-func TestOpenFailsOnTornTailInNotLastSegment(t *testing.T) {
-	dir := t.TempDir()
-	path := segmentPath(dir, "log_", 0)
-	writeRecords(t, dir, 2, 3)
-
-	require.NoError(t, os.Truncate(path, fileSize(t, path)-1))
-
-	_, err := NewWAL(tornTailConfig(dir, 2))
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "partial frame")
 }
