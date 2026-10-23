@@ -53,7 +53,7 @@ func openSegments(numbers []segmentNumber, namer segmentNamer) (*segment, map[ui
 	var active *segment
 
 	for i, number := range numbers {
-		s, err := openSegment(namer.path(number))
+		s, err := openSegment(namer.path(number), i == len(numbers)-1)
 		if err != nil {
 			return nil, nil, nil, 0, errors.Wrap(err, "failed to load indexes from record log file")
 		}
@@ -154,7 +154,7 @@ func (s *segmentSet) rotateIfNeeded() error {
 		}
 	}
 
-	active, err := openSegment(s.namer.path(s.next))
+	active, err := openSegment(s.namer.path(s.next), true)
 	if err != nil {
 		return errors.Wrap(err, "failed to create new log file")
 	}

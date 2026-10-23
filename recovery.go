@@ -37,7 +37,7 @@ func handleCorruptedSegment(segmentPath string) (bool, error) {
 		return true, nil
 	}
 
-	seg, err := openSegment(segmentPath)
+	seg, err := openSegment(segmentPath, false)
 	if err == nil {
 		_ = seg.Close()
 		return false, nil

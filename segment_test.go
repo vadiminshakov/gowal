@@ -11,7 +11,7 @@ import (
 func TestSegmentAppendAddsRecordsToIndex(t *testing.T) {
 	dir := t.TempDir()
 
-	seg, err := openSegment(segmentPath(dir, "log_", 0))
+	seg, err := openSegment(segmentPath(dir, "log_", 0), false)
 	require.NoError(t, err)
 	defer seg.Close()
 
@@ -30,7 +30,7 @@ func TestSegmentAppendAddsRecordsToIndex(t *testing.T) {
 func TestOpenSegmentLoadsIndexFromExistingFile(t *testing.T) {
 	dir := t.TempDir()
 
-	seg, err := openSegment(segmentPath(dir, "log_", 0))
+	seg, err := openSegment(segmentPath(dir, "log_", 0), false)
 	require.NoError(t, err)
 
 	record := NewRecord(1, "key1", []byte("value1"))
@@ -38,7 +38,7 @@ func TestOpenSegmentLoadsIndexFromExistingFile(t *testing.T) {
 	require.NoError(t, seg.Append([]Record{record}))
 	require.NoError(t, seg.Close())
 
-	loadedSegment, err := openSegment(segmentPath(dir, "log_", 0))
+	loadedSegment, err := openSegment(segmentPath(dir, "log_", 0), false)
 	require.NoError(t, err)
 	defer loadedSegment.Close()
 
@@ -50,7 +50,7 @@ func TestOpenSegmentLoadsIndexFromExistingFile(t *testing.T) {
 func TestSegmentLoadCorruptedSegmentReturnsError(t *testing.T) {
 	dir := t.TempDir()
 
-	seg, err := openSegment(segmentPath(dir, "log_", 0))
+	seg, err := openSegment(segmentPath(dir, "log_", 0), false)
 	require.NoError(t, err)
 
 	record := NewRecord(1, "key1", []byte("value1"))
@@ -64,7 +64,7 @@ func TestSegmentLoadCorruptedSegmentReturnsError(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, file.Close())
 
-	_, err = openSegment(seg.Path())
+	_, err = openSegment(seg.Path(), false)
 	require.Error(t, err)
 }
 
@@ -92,7 +92,7 @@ func TestOpenSegmentRejectsOversizedFrameLength(t *testing.T) {
 	binary.BigEndian.PutUint32(hdr[4:8], maxFrameDataSize+1)
 	require.NoError(t, os.WriteFile(segPath, hdr[:], 0644))
 
-	_, err := openSegment(segPath)
+	_, err := openSegment(segPath, false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "frame data too large")
 }

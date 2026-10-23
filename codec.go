@@ -2,6 +2,7 @@ package gowal
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -14,6 +15,12 @@ const (
 	frameHeaderSize  int    = 8 // CRC32(4) + Length(4)
 	frameTrailerSize int    = 4
 	maxFrameDataSize uint32 = 16 * 1024 * 1024 // 16 MiB
+)
+
+var (
+	errPartialFrame     = errors.New("partial frame")
+	errChecksumMismatch = errors.New("checksum mismatch")
+	errInvalidTrailer   = errors.New("invalid frame trailer")
 )
 
 type codec struct{}
@@ -40,7 +47,7 @@ func (codec) unmarshal(r io.Reader) (Record, error) {
 	var hdr [frameHeaderSize]byte
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {
 		if err == io.ErrUnexpectedEOF {
-			return Record{}, fmt.Errorf("partial frame header")
+			return Record{}, fmt.Errorf("%w header", errPartialFrame)
 		}
 		return Record{}, err
 	}
@@ -54,7 +61,7 @@ func (codec) unmarshal(r io.Reader) (Record, error) {
 	data := make([]byte, dataLen)
 	if _, err := io.ReadFull(r, data); err != nil {
 		if err == io.ErrUnexpectedEOF {
-			return Record{}, fmt.Errorf("partial frame data")
+			return Record{}, fmt.Errorf("%w data", errPartialFrame)
 		}
 		return Record{}, err
 	}
@@ -62,17 +69,17 @@ func (codec) unmarshal(r io.Reader) (Record, error) {
 	var trail [frameTrailerSize]byte
 	if _, err := io.ReadFull(r, trail[:]); err != nil {
 		if err == io.ErrUnexpectedEOF {
-			return Record{}, fmt.Errorf("partial frame trailer")
+			return Record{}, fmt.Errorf("%w trailer", errPartialFrame)
 		}
 		return Record{}, err
 	}
 
 	if binary.BigEndian.Uint32(trail[:]) != frameTrailer {
-		return Record{}, fmt.Errorf("invalid frame trailer")
+		return Record{}, errInvalidTrailer
 	}
 
 	if crc32.ChecksumIEEE(data) != wantCRC {
-		return Record{}, fmt.Errorf("checksum mismatch")
+		return Record{}, errChecksumMismatch
 	}
 
 	var rec Record

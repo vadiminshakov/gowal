@@ -51,6 +51,9 @@ type Config struct {
 }
 
 // NewWAL creates a new WAL with the given configuration.
+//
+// A torn last frame in the last segment (left by a crash in the middle of a write) is truncated.
+// Corruption anywhere else returns an error.
 func NewWAL(config Config) (*Wal, error) {
 	if err := os.MkdirAll(config.Dir, 0755); err != nil {
 		return nil, errors.Wrap(err, "failed to create log directory")
