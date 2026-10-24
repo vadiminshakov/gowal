@@ -53,7 +53,8 @@ type Config struct {
 // NewWAL creates a new WAL with the given configuration.
 //
 // A torn last frame in the last segment (left by a crash in the middle of a write) is truncated.
-// Corruption anywhere else returns an error.
+// Corruption anywhere else returns an error, and so does a gap in indexes (ErrIndexGap).
+// Such a log can be cut to its valid prefix with UnsafeRecover.
 func NewWAL(config Config) (*Wal, error) {
 	if err := os.MkdirAll(config.Dir, 0755); err != nil {
 		return nil, errors.Wrap(err, "failed to create log directory")
@@ -74,17 +75,22 @@ func NewWAL(config Config) (*Wal, error) {
 	return w, nil
 }
 
-// UnsafeRecover recovers the WAL from the given directory.
-// It is unsafe because it removes all the corrupted segment files (invalid frame trailer or checksum mismatch).
-// It returns the list of segment files that were removed.
-func UnsafeRecover(dir, segmentPrefix string) ([]string, error) {
+// UnsafeRecover recovers the WAL in the given directory, so that NewWAL can open it.
+//
+// It cuts the log at the first broken frame or index gap and removes everything after it,
+// including all later segments. The remaining log is a contiguous prefix without holes.
+// It is unsafe because the dropped records are lost, even if they are valid.
+//
+// A broken frame or gap is not an error: it is reported in RecoverResult.
+// An error is returned only if the log files can't be read, truncated or removed.
+func UnsafeRecover(dir, segmentPrefix string) (RecoverResult, error) {
 	namer := segmentNamer{dir: dir, prefix: segmentPrefix}
 	segmentsNumbers, err := findSegmentNumbers(dir, namer)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to find segment numbers")
+		return RecoverResult{}, errors.Wrap(err, "failed to find segment numbers")
 	}
 
-	return removeCorruptedSegments(segmentsNumbers, namer)
+	return cutLog(segmentsNumbers, namer)
 }
 
 // Get queries record at specific index in the log.

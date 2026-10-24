@@ -60,7 +60,9 @@ func (codec) unmarshal(r io.Reader) (Record, error) {
 
 	data := make([]byte, dataLen)
 	if _, err := io.ReadFull(r, data); err != nil {
-		if err == io.ErrUnexpectedEOF {
+		// ReadFull returns io.EOF if it read nothing. The header is already read,
+		// so the file ends right after the header: this is a partial frame, not the end of the log.
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
 			return Record{}, fmt.Errorf("%w data", errPartialFrame)
 		}
 		return Record{}, err
@@ -68,7 +70,7 @@ func (codec) unmarshal(r io.Reader) (Record, error) {
 
 	var trail [frameTrailerSize]byte
 	if _, err := io.ReadFull(r, trail[:]); err != nil {
-		if err == io.ErrUnexpectedEOF {
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
 			return Record{}, fmt.Errorf("%w trailer", errPartialFrame)
 		}
 		return Record{}, err

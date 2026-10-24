@@ -51,9 +51,10 @@ func openSegments(numbers []segmentNumber, namer segmentNamer) (*segment, map[ui
 
 	var lastIndex uint64
 	var active *segment
+	var seq indexSequence
 
 	for i, number := range numbers {
-		s, err := openSegment(namer.path(number), i == len(numbers)-1)
+		s, err := openSegment(namer.path(number), i == len(numbers)-1, &seq)
 		if err != nil {
 			return nil, nil, nil, 0, errors.Wrap(err, "failed to load indexes from record log file")
 		}
@@ -154,7 +155,7 @@ func (s *segmentSet) rotateIfNeeded() error {
 		}
 	}
 
-	active, err := openSegment(s.namer.path(s.next), true)
+	active, err := openSegment(s.namer.path(s.next), true, &indexSequence{})
 	if err != nil {
 		return errors.Wrap(err, "failed to create new log file")
 	}
@@ -201,7 +202,7 @@ func (s *segmentSet) removeSegment(number segmentNumber) error {
 
 func removeSegmentFile(segmentPath string) error {
 	if err := os.Remove(segmentPath); err != nil {
-		return errors.Wrap(err, "failed to remove oldest segment")
+		return errors.Wrapf(err, "failed to remove segment %s", segmentPath)
 	}
 	return nil
 }

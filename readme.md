@@ -83,14 +83,19 @@ if err != nil {
 ```
 
 ### Recover corrupted WAL
-If the WAL is corrupted, you can recover it by calling the `UnsafeRecover` function:
+A torn last frame left by a crash in the middle of a write is truncated by `NewWAL` automatically.
+Corruption anywhere else or a gap in indexes (`ErrIndexGap`, e.g. a segment file from the middle is lost) makes `NewWAL` return an error,
+because the records after it are valid and dropping them loses data.
+
+If you can't restore the log from elsewhere, you can cut it to its valid prefix by calling the `UnsafeRecover` function.
+It truncates the log at the first broken frame or index gap and removes everything after it, including all later segments:
 
 ```go
-removedFiles, err := gowal.UnsafeRecover("./log", "segment_")
+result, err := gowal.UnsafeRecover("./log", "segment_")
 if err != nil {
     log.Fatal(err)
 }
-log.Printf("Removed corrupted files: %v", removedFiles)
+log.Printf("Truncated: %q, removed: %v, last index: %d", result.Truncated, result.Removed, result.LastIndex)
 ```
 
 ### Configuration
