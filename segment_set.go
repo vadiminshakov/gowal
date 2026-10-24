@@ -79,20 +79,16 @@ func openSegments(numbers []segmentNumber, namer segmentNamer) (*segment, map[ui
 	return active, historical, historicalBySegment, lastIndex, nil
 }
 
-func (s *segmentSet) append(records []Record) error {
+func (s *segmentSet) append(records []Record, sync bool) error {
 	if err := s.rotateIfNeeded(); err != nil {
 		return err
 	}
 
-	if err := s.active.Append(records); err != nil {
+	if err := s.active.Append(records, sync); err != nil {
 		return err
 	}
 
 	return nil
-}
-
-func (s *segmentSet) syncActive() error {
-	return s.active.Sync()
 }
 
 func (s *segmentSet) close() error {

@@ -49,7 +49,8 @@ func openSegment(segmentPath string, repairTornTail bool, seq *indexSequence) (*
 	return s, nil
 }
 
-func (s *segment) Append(records []Record) error {
+// Append writes records to the segment file and, if sync is set, syncs it.
+func (s *segment) Append(records []Record, sync bool) error {
 	s.buf.Reset()
 	s.buf.Grow(len(records) * 150)
 
@@ -63,6 +64,12 @@ func (s *segment) Append(records []Record) error {
 
 	if _, err := s.file.Write(s.buf.Bytes()); err != nil {
 		return errors.Wrap(err, "failed to write record to log")
+	}
+
+	if sync {
+		if err := s.file.Sync(); err != nil {
+			return errors.Wrap(err, "failed to sync log")
+		}
 	}
 
 	for _, record := range records {

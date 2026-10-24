@@ -17,6 +17,9 @@ const (
 	maxFrameDataSize uint32 = 16 * 1024 * 1024 // 16 MiB
 )
 
+// ErrRecordTooLarge is returned when an encoded record exceeds the maximum frame size.
+var ErrRecordTooLarge = errors.New("record too large")
+
 var (
 	errPartialFrame     = errors.New("partial frame")
 	errChecksumMismatch = errors.New("checksum mismatch")
@@ -31,7 +34,7 @@ func (codec) marshal(r Record) ([]byte, error) {
 		return nil, err
 	}
 	if len(data) > int(maxFrameDataSize) {
-		return nil, fmt.Errorf("frame data too large: %d > %d", len(data), maxFrameDataSize)
+		return nil, fmt.Errorf("%w: frame data too large: %d > %d", ErrRecordTooLarge, len(data), maxFrameDataSize)
 	}
 
 	frame := make([]byte, frameHeaderSize+len(data)+frameTrailerSize)

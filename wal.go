@@ -1,6 +1,7 @@
 package gowal
 
 import (
+	"fmt"
 	"iter"
 	"os"
 	"slices"
@@ -13,6 +14,10 @@ import (
 var (
 	ErrExists             = errors.New("record with such index already exists")
 	ErrNonSequentialIndex = errors.New("record index must be next in sequence")
+
+	// ErrFailed is returned by all writes after a write or sync of the log has failed.
+	// The WAL must be closed and opened again.
+	ErrFailed = errors.New("wal is failed after an I/O error, reopen it")
 )
 
 // Wal is a write-ahead log that stores key-value pairs.
@@ -30,6 +35,9 @@ type Wal struct {
 	lastIndex atomic.Uint64
 
 	isInSyncDiskMode bool
+
+	// failed is the error that stopped the log, or nil
+	failed error
 }
 
 // Config represents the configuration for the WAL (Write-Ahead Log).
@@ -116,6 +124,10 @@ func (c *Wal) Write(record Record) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.failed != nil {
+		return c.failed
+	}
+
 	expectedIndex := c.lastIndex.Load() + 1
 	if record.Index != expectedIndex {
 		return errors.Wrapf(ErrNonSequentialIndex, "expected index %d, got %d", expectedIndex, record.Index)
@@ -149,6 +161,10 @@ func (c *Wal) WriteBatch(batch Batch) error {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if c.failed != nil {
+		return c.failed
+	}
 
 	if err := workingBatch.validateSequenceAfter(c.lastIndex.Load()); err != nil {
 		return err
@@ -188,6 +204,10 @@ func (c *Wal) WriteTombstone(index uint64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.failed != nil {
+		return c.failed
+	}
+
 	existingRecord, ok := c.segments.record(index)
 	if !ok {
 		return nil
@@ -204,18 +224,19 @@ func (c *Wal) WriteTombstone(index uint64) error {
 }
 
 // writeRecords is an internal method that encodes and writes records to the log.
+// Any error except a too large record stops the log: the file state after a failed write or sync is unknown,
+// and retrying fsync is unsafe because the kernel may have already dropped the dirty pages.
 func (c *Wal) writeRecords(records []Record) error {
-	if err := c.segments.append(records); err != nil {
+	err := c.segments.append(records, c.isInSyncDiskMode)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, ErrRecordTooLarge) {
 		return err
 	}
 
-	if c.isInSyncDiskMode {
-		if err := c.segments.syncActive(); err != nil {
-			return errors.Wrap(err, "failed to sync log")
-		}
-	}
-
-	return nil
+	c.failed = fmt.Errorf("%w: %w", ErrFailed, err)
+	return c.failed
 }
 
 // Iterator returns push-based iterator for the WAL records.

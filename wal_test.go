@@ -945,6 +945,19 @@ func TestUnsafeRecoverKeepsValidLogWithTombstones(t *testing.T) {
 	require.Equal(t, RecoverResult{LastIndex: 4}, result)
 }
 
+func TestTooLargeRecordDoesNotStopLog(t *testing.T) {
+	log, err := NewWAL(Config{Dir: t.TempDir(), Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
+	require.NoError(t, err)
+	defer log.Close()
+
+	err = log.Write(NewRecord(1, "key", make([]byte, maxFrameDataSize)))
+	require.ErrorIs(t, err, ErrRecordTooLarge)
+	require.NotErrorIs(t, err, ErrFailed)
+
+	require.NoError(t, log.Write(NewRecord(1, "key", []byte("value"))))
+	require.Equal(t, uint64(1), log.CurrentIndex())
+}
+
 func writeRecords(t *testing.T, dir string, threshold int, count uint64) {
 	t.Helper()
 

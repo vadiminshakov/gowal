@@ -49,6 +49,10 @@ if err != nil {
 ```
 If the index does not continue the monotonic sequence, the function will return an error.
 
+The WAL is fail-stop: if writing or syncing the log fails, the write returns `ErrFailed` and all further writes return it too.
+The in-memory state keeps only the records written before the error. Close the WAL and open it again with `NewWAL`:
+the failed record may or may not be in the reopened log. A record that is too large (`ErrRecordTooLarge`) does not stop the WAL.
+
 ### Retrieving a log entry
 
 You can retrieve a log entry by its index:
