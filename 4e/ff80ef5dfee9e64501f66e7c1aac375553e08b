@@ -1,0 +1,34 @@
+codec.go
+  s_104906961fda15::t_30a38999ecb49e 37
+  s_104906961fda15::t_0154f5b7839878 20-22
+segment.go
+  s_104906961fda15::t_d0a39f9030ed92 52-53,69-72
+  s_104906961fda15::t_5155b123de3376 73-74
+readme.md
+  s_104906961fda15::t_ce4773116f259a 52-55
+segment_set.go
+  s_104906961fda15::t_a1772a6fa14101 82,87
+segment_test.go
+  s_104906961fda15::t_0fc000520659f4 22,38,58
+wal.go
+  s_104906961fda15::t_0fc000520659f4 4,17-20,38-40,127-130,165-168,207-210,227-228,230-232,234-235,238-239
+wal_test.go
+  s_104906961fda15::t_b5c1dcb90a8616 948-958
+  s_104906961fda15::t_5c28ef2ebf7da9 959-960
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4eff80ef5dfee9e64501f66e7c1aac375553e08b",
+  "prompts": {},
+  "sessions": {
+    "s_104906961fda15": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b43e1adf-9c61-4a07-9965-aa6588846d4d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Vadim Inshakov <vadiminshakov@gmail.com>"
+    }
+  }
+}
