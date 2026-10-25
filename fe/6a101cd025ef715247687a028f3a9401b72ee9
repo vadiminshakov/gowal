@@ -1,0 +1,27 @@
+readme.md
+  s_ca93ba893a49f1::t_5b27f15bc216e8 55
+  s_ca93ba893a49f1::t_fa8d90ec363e65 136-139,142
+wal_test.go
+  s_ca93ba893a49f1::t_78999dacf61010 961-977,979-1019
+  s_ca93ba893a49f1::t_3c161cd5974133 978
+wal.go
+  s_ca93ba893a49f1::t_8faf9633ae5f67 227-229,235
+segment_set.go
+  s_ca93ba893a49f1::t_8faf9633ae5f67 4,11-13,139,145-146,151,154-157,163-166,170-177,200
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fe6a101cd025ef715247687a028f3a9401b72ee9",
+  "prompts": {},
+  "sessions": {
+    "s_ca93ba893a49f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a72b0b3-a747-4350-9dae-cde8ffab6bd8",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Vadim Inshakov <vadiminshakov@gmail.com>"
+    }
+  }
+}
