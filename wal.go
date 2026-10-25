@@ -224,14 +224,15 @@ func (c *Wal) WriteTombstone(index uint64) error {
 }
 
 // writeRecords is an internal method that encodes and writes records to the log.
-// Any error except a too large record stops the log: the file state after a failed write or sync is unknown,
-// and retrying fsync is unsafe because the kernel may have already dropped the dirty pages.
+// Any error except a too large record or a failed creation of a new segment stops the log:
+// the file state after a failed write or sync is unknown, and retrying fsync is unsafe
+// because the kernel may have already dropped the dirty pages.
 func (c *Wal) writeRecords(records []Record) error {
 	err := c.segments.append(records, c.isInSyncDiskMode)
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, ErrRecordTooLarge) {
+	if errors.Is(err, ErrRecordTooLarge) || errors.Is(err, errRotation) {
 		return err
 	}
 

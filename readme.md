@@ -52,6 +52,7 @@ If the index does not continue the monotonic sequence, the function will return 
 The WAL is fail-stop: if writing or syncing the log fails, the write returns `ErrFailed` and all further writes return it too.
 The in-memory state keeps only the records written before the error. Close the WAL and open it again with `NewWAL`:
 the failed record may or may not be in the reopened log. A record that is too large (`ErrRecordTooLarge`) does not stop the WAL.
+Neither does a failure to create a new segment on rotation: nothing is written in this case, and the write can be retried.
 
 ### Retrieving a log entry
 
@@ -132,11 +133,13 @@ Data is split into numbered files (`segment_0`, `segment_1`, etc.). Internally, 
 
 #### Rotation & Segment Management
 When the active segment size exceeds `SegmentThreshold`:
-1. Current segment is closed
-2. Active segment index is merged into the historical index
-3. New segment is created
+1. Current segment is synced
+2. New segment is created; if it fails, the current segment stays active
+3. Active segment index is merged into the historical index and the new segment becomes active
+4. Old segment is closed
 
 When `MaxSegments` limit is reached, the oldest segment is automatically deleted along with its index entries to manage disk space.
+A failed deletion does not fail the write: the segment is kept and deleted on the next rotation.
 
 #### Read Operations
 Lookups check both indexes:

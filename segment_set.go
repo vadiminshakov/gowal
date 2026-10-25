@@ -1,11 +1,15 @@
 package gowal
 
 import (
+	"fmt"
 	"maps"
 	"os"
 
 	"github.com/pkg/errors"
 )
+
+// errRotation is returned when a new segment can't be created.
+var errRotation = errors.New("segment rotation failed")
 
 type segmentSet struct {
 	namer                    segmentNamer
@@ -132,50 +136,46 @@ func (s *segmentSet) forgetHistorical(index uint64) {
 	}
 }
 
+// rotateIfNeeded switches to a new segment when the active one is full.
 func (s *segmentSet) rotateIfNeeded() error {
 	if s.active.Entries() < s.threshold {
 		return nil
 	}
 
-	if err := s.active.Close(); err != nil {
-		return errors.Wrap(err, "failed to close log file")
-	}
-
-	activeIndex := s.active.index
-	maps.Copy(s.historicalIndex, activeIndex)
-	s.historicalIndexBySegment[s.activeNumber] = activeIndex
-
-	if s.max > 0 && len(s.numbers) >= s.max {
-		if err := s.removeOldestSegment(); err != nil {
-			return err
-		}
+	if err := s.active.Sync(); err != nil {
+		return errors.Wrap(err, "failed to sync log file before rotation")
 	}
 
 	active, err := openSegment(s.namer.path(s.next), true, &indexSequence{})
 	if err != nil {
-		return errors.Wrap(err, "failed to create new log file")
+		return fmt.Errorf("%w: failed to create new log file: %w", errRotation, err)
 	}
+
+	old := s.active
+	maps.Copy(s.historicalIndex, old.index)
+	s.historicalIndexBySegment[s.activeNumber] = old.index
 
 	s.active = active
 	s.activeNumber = s.next
 	s.numbers = append(s.numbers, s.next)
 	s.next++
 
+	_ = old.Close()
+
+	s.removeExtraSegments()
+
 	return nil
 }
 
-func (s *segmentSet) removeOldestSegment() error {
-	if len(s.numbers) == 0 {
-		return nil
+// removeExtraSegments removes the oldest segments above the max limit.
+// A failed removal doesn't fail the write: the segment is kept and removed on the next rotation.
+func (s *segmentSet) removeExtraSegments() {
+	for s.max > 0 && len(s.numbers) > s.max {
+		if err := s.removeSegment(s.numbers[0]); err != nil {
+			return
+		}
+		s.numbers = s.numbers[1:]
 	}
-
-	oldest := s.numbers[0]
-	if err := s.removeSegment(oldest); err != nil {
-		return err
-	}
-
-	s.numbers = s.numbers[1:]
-	return nil
 }
 
 func (s *segmentSet) removeSegment(number segmentNumber) error {
@@ -197,7 +197,7 @@ func (s *segmentSet) removeSegment(number segmentNumber) error {
 }
 
 func removeSegmentFile(segmentPath string) error {
-	if err := os.Remove(segmentPath); err != nil {
+	if err := os.Remove(segmentPath); err != nil && !os.IsNotExist(err) {
 		return errors.Wrapf(err, "failed to remove segment %s", segmentPath)
 	}
 	return nil

@@ -958,6 +958,65 @@ func TestTooLargeRecordDoesNotStopLog(t *testing.T) {
 	require.Equal(t, uint64(1), log.CurrentIndex())
 }
 
+func TestRotationFailureDoesNotStopLog(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+
+	dir := t.TempDir()
+	config := Config{Dir: dir, Prefix: "log_", SegmentThreshold: 2, IsInSyncDiskMode: true}
+	log, err := NewWAL(config)
+	require.NoError(t, err)
+
+	require.NoError(t, log.Write(NewRecord(1, "key1", []byte("value1"))))
+	require.NoError(t, log.Write(NewRecord(2, "key2", []byte("value2"))))
+
+	require.NoError(t, os.Chmod(dir, 0555))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0755) })
+
+	err = log.Write(NewRecord(3, "key3", []byte("value3")))
+	require.ErrorIs(t, err, errRotation)
+	require.NotErrorIs(t, err, ErrFailed)
+	require.Equal(t, uint64(2), log.CurrentIndex())
+
+	require.NoError(t, os.Chmod(dir, 0755))
+	require.NoError(t, log.Write(NewRecord(3, "key3", []byte("value3"))))
+	require.NoError(t, log.Write(NewRecord(4, "key4", []byte("value4"))))
+	require.NoError(t, log.Close())
+
+	log, err = NewWAL(config)
+	require.NoError(t, err)
+	defer log.Close()
+
+	require.Equal(t, uint64(4), log.CurrentIndex())
+	for i := uint64(1); i <= 4; i++ {
+		record, err := log.Get(i)
+		require.NoError(t, err)
+		require.Equal(t, "value"+strconv.FormatUint(i, 10), string(record.Value))
+	}
+}
+
+func TestSegmentRemovalFailureDoesNotFailWrite(t *testing.T) {
+	dir := t.TempDir()
+	log, err := NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 1, MaxSegments: 2, IsInSyncDiskMode: true})
+	require.NoError(t, err)
+	defer log.Close()
+
+	require.NoError(t, log.Write(NewRecord(1, "key", []byte("value"))))
+	require.NoError(t, log.Write(NewRecord(2, "key", []byte("value"))))
+
+	// a non-empty directory in place of the oldest segment makes its removal fail
+	oldest := segmentPath(dir, "log_", 0)
+	require.NoError(t, os.Remove(oldest))
+	require.NoError(t, os.Mkdir(oldest, 0755))
+	require.NoError(t, os.WriteFile(oldest+"/file", []byte("x"), 0644))
+
+	require.NoError(t, log.Write(NewRecord(3, "key", []byte("value"))))
+	require.NoError(t, log.Write(NewRecord(4, "key", []byte("value"))))
+	require.Equal(t, uint64(4), log.CurrentIndex())
+	require.DirExists(t, oldest)
+}
+
 func writeRecords(t *testing.T, dir string, threshold int, count uint64) {
 	t.Helper()
 
