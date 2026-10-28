@@ -19,13 +19,12 @@ go get github.com/vadiminshakov/gowal
 
 ### Initialization
 
-To create a new WAL instance, specify the directory to store logs and a prefix for the log files:
+To create a WAL instance, configure the segment prefix and rotation:
 
 ```go
 import "github.com/vadiminshakov/gowal"
 
 cfg := gowal.Config{
-    Dir:    "./log",
     Prefix: "segment_",
     SegmentThreshold: 1000,
     MaxSegments:      100,
@@ -78,6 +77,8 @@ for record := range wal.Iterator() {
 ```
 
 ### Closing the WAL
+Close syncs pending records in both sync and async modes, then closes the active file.
+
 Always ensure that you close the WAL instance to properly flush and close the log files:
 
 ```go
@@ -96,7 +97,7 @@ If you can't restore the log from elsewhere, you can cut it to its valid prefix 
 It truncates the log at the first broken frame or index gap and removes everything after it, including all later segments:
 
 ```go
-result, err := gowal.UnsafeRecover("./log", "segment_")
+result, err := gowal.UnsafeRecover("segment_")
 if err != nil {
     log.Fatal(err)
 }
@@ -108,7 +109,7 @@ The behavior of the WAL can be configured using several configuration options (`
 
  - `SegmentThreshold`: Maximum number of log entries per segment before rotation occurs. Default is 1000.
  - `MaxSegments`: Maximum number of segments to keep before the oldest segments are deleted. Default is 5.
- - `IsInSyncDiskMode`: When set to true, every write is synced to disk, ensuring durability at the cost of performance. Default is false.
+ - `IsInSyncDiskMode`: When set to true, every successful write is synced to disk. In async mode (the default), recent writes can be lost on a crash; segments are synced before rotation and on successful Close. Segment creation and deletion always sync the directory, regardless of this setting. Creation of `./log` is persisted by syncing the current directory.
 
 ## Architecture
 
@@ -134,12 +135,14 @@ Data is split into numbered files (`segment_0`, `segment_1`, etc.). Internally, 
 #### Rotation & Segment Management
 When the active segment size exceeds `SegmentThreshold`:
 1. Current segment is synced
-2. New segment is created; if it fails, the current segment stays active
+2. New segment is created and its directory is synced; a creation failure keeps the current segment active and can be retried, while a sync failure stops the WAL
 3. Active segment index is merged into the historical index and the new segment becomes active
 4. Old segment is closed
 
 When `MaxSegments` limit is reached, the oldest segment is automatically deleted along with its index entries to manage disk space.
-A failed deletion does not fail the write: the segment is kept and deleted on the next rotation.
+After deletion the directory is synced before index entries are removed. Any deletion or directory
+sync error stops the WAL with `ErrFailed`; the pending record is not appended. UnsafeRecover also
+syncs the directory after each deletion and returns any error.
 
 #### Read Operations
 Lookups check both indexes:

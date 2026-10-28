@@ -13,8 +13,8 @@ import (
 )
 
 func TestWriteAndGet(t *testing.T) {
+	testLogDir(t)
 	log, err := NewWAL(Config{
-		Dir:              "./testlogdata",
 		Prefix:           "log_",
 		SegmentThreshold: 10,
 		MaxSegments:      5,
@@ -33,13 +33,12 @@ func TestWriteAndGet(t *testing.T) {
 		require.Equal(t, "value"+strconv.Itoa(i), string(record.Value))
 	}
 
-	require.NoError(t, os.RemoveAll("./testlogdata"))
+	require.NoError(t, os.RemoveAll("log"))
 }
 
 func TestWriteCopiesValue(t *testing.T) {
-	dir := t.TempDir()
+	testLogDir(t)
 	log, err := NewWAL(Config{
-		Dir:              dir,
 		Prefix:           "log_",
 		SegmentThreshold: 10,
 		MaxSegments:      5,
@@ -63,9 +62,8 @@ func TestWriteCopiesValue(t *testing.T) {
 }
 
 func TestIteratorCopiesValue(t *testing.T) {
-	dir := t.TempDir()
+	testLogDir(t)
 	log, err := NewWAL(Config{
-		Dir:              dir,
 		Prefix:           "log_",
 		SegmentThreshold: 10,
 		MaxSegments:      5,
@@ -86,9 +84,8 @@ func TestIteratorCopiesValue(t *testing.T) {
 }
 
 func TestWriteRequiresSequentialIndexStartingAtOne(t *testing.T) {
-	dir := t.TempDir()
+	testLogDir(t)
 	log, err := NewWAL(Config{
-		Dir:              dir,
 		Prefix:           "log_",
 		SegmentThreshold: 10,
 		MaxSegments:      5,
@@ -111,9 +108,8 @@ func TestWriteRequiresSequentialIndexStartingAtOne(t *testing.T) {
 }
 
 func TestCurrentIndexTracksSequentialBatch(t *testing.T) {
-	dir := t.TempDir()
+	testLogDir(t)
 	log, err := NewWAL(Config{
-		Dir:              dir,
 		Prefix:           "log_",
 		SegmentThreshold: 10,
 		MaxSegments:      5,
@@ -131,7 +127,6 @@ func TestCurrentIndexTracksSequentialBatch(t *testing.T) {
 	require.NoError(t, log.Close())
 
 	log, err = NewWAL(Config{
-		Dir:              dir,
 		Prefix:           "log_",
 		SegmentThreshold: 10,
 		MaxSegments:      5,
@@ -143,8 +138,8 @@ func TestCurrentIndexTracksSequentialBatch(t *testing.T) {
 }
 
 func TestIterator(t *testing.T) {
+	testLogDir(t)
 	log, err := NewWAL(Config{
-		Dir:              "./testlogdata",
 		Prefix:           "log_",
 		SegmentThreshold: 10,
 		MaxSegments:      5,
@@ -182,12 +177,12 @@ func TestIterator(t *testing.T) {
 		}
 	})
 
-	require.NoError(t, os.RemoveAll("./testlogdata"))
+	require.NoError(t, os.RemoveAll("log"))
 }
 
 func TestLoadIndex(t *testing.T) {
+	testLogDir(t)
 	log, err := NewWAL(Config{
-		Dir:              "./testlogdata",
 		Prefix:           "log_",
 		SegmentThreshold: 10,
 		MaxSegments:      5,
@@ -207,15 +202,15 @@ func TestLoadIndex(t *testing.T) {
 		require.Equal(t, "value"+strconv.Itoa(i), string(index[uint64(i)].Value))
 	}
 
-	require.NoError(t, os.RemoveAll("./testlogdata"))
+	require.NoError(t, os.RemoveAll("log"))
 }
 
 func TestSegmentRotation(t *testing.T) {
+	testLogDir(t)
 	segmentThreshold := 10
 	segmentsNumber := 2
 
 	log, err := NewWAL(Config{
-		Dir:              "./testlogdata",
 		Prefix:           "log_",
 		SegmentThreshold: segmentThreshold,
 		MaxSegments:      segmentsNumber,
@@ -244,18 +239,18 @@ func TestSegmentRotation(t *testing.T) {
 		require.Equal(t, "value"+strconv.Itoa(keyWithOffset), string(v.Value))
 	}
 
-	require.NoError(t, os.RemoveAll("./testlogdata"))
+	require.NoError(t, os.RemoveAll("log"))
 }
 
 // create two segments, app down, up and repair index.
 func TestServiceDownUpAndRepairIndex(t *testing.T) {
+	testLogDir(t)
 	segmentThreshold := 10
 
 	initWal := func() (*Wal, error) {
 		t.Helper()
 
 		return NewWAL(Config{
-			Dir:              "./testlogdata",
 			Prefix:           "log_",
 			SegmentThreshold: segmentThreshold,
 			MaxSegments:      5,
@@ -292,17 +287,16 @@ func TestServiceDownUpAndRepairIndex(t *testing.T) {
 		require.Equal(t, "value"+strconv.Itoa(i), string(record.Value))
 	}
 
-	require.NoError(t, os.RemoveAll("./testlogdata"))
+	require.NoError(t, os.RemoveAll("log"))
 }
 
 func TestRotationAfterRestartWithMissingOldSegment(t *testing.T) {
-	dir := t.TempDir()
+	testLogDir(t)
 	const segmentThreshold = 2
 
 	open := func() (*Wal, error) {
 		t.Helper()
 		return NewWAL(Config{
-			Dir:              dir,
 			Prefix:           "log_",
 			SegmentThreshold: segmentThreshold,
 			MaxSegments:      5,
@@ -317,7 +311,7 @@ func TestRotationAfterRestartWithMissingOldSegment(t *testing.T) {
 		require.NoError(t, log.Write(NewRecord(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i)))))
 	}
 	require.NoError(t, log.Close())
-	require.NoError(t, os.Remove(segmentPath(dir, "log_", 0)))
+	require.NoError(t, os.Remove(segmentPath(logDir, "log_", 0)))
 
 	log, err = open()
 	require.NoError(t, err)
@@ -327,18 +321,17 @@ func TestRotationAfterRestartWithMissingOldSegment(t *testing.T) {
 		require.NoError(t, log.Write(NewRecord(uint64(i), "key"+strconv.Itoa(i), []byte("value"+strconv.Itoa(i)))))
 	}
 
-	require.NoFileExists(t, segmentPath(dir, "log_", 0))
-	require.FileExists(t, segmentPath(dir, "log_", 1))
-	require.FileExists(t, segmentPath(dir, "log_", 4))
+	require.NoFileExists(t, segmentPath(logDir, "log_", 0))
+	require.FileExists(t, segmentPath(logDir, "log_", 1))
+	require.FileExists(t, segmentPath(logDir, "log_", 4))
 }
 
 func TestCurrentIndexDoesNotRegressWhenActiveSegmentHasOnlyOldTombstone(t *testing.T) {
-	dir := t.TempDir()
+	testLogDir(t)
 
 	open := func() (*Wal, error) {
 		t.Helper()
 		return NewWAL(Config{
-			Dir:              dir,
 			Prefix:           "log_",
 			SegmentThreshold: 2,
 			MaxSegments:      10,
@@ -364,8 +357,8 @@ func TestCurrentIndexDoesNotRegressWhenActiveSegmentHasOnlyOldTombstone(t *testi
 }
 
 func TestChecksum(t *testing.T) {
+	testLogDir(t)
 	log, err := NewWAL(Config{
-		Dir:              "./testlogdata",
 		Prefix:           "log_",
 		SegmentThreshold: 10,
 		MaxSegments:      5,
@@ -385,12 +378,12 @@ func TestChecksum(t *testing.T) {
 		require.Equal(t, []byte("value"+strconv.Itoa(i)), record.Value)
 	}
 
-	require.NoError(t, os.RemoveAll("./testlogdata"))
+	require.NoError(t, os.RemoveAll("log"))
 }
 
 func TestChecksum_Corrupted(t *testing.T) {
+	testLogDir(t)
 	log, err := NewWAL(Config{
-		Dir:              "./testlogdata",
 		Prefix:           "log_",
 		SegmentThreshold: 10,
 		MaxSegments:      5,
@@ -406,14 +399,13 @@ func TestChecksum_Corrupted(t *testing.T) {
 	log.Close()
 
 	// corrupt the data by writing some garbage to the segment file
-	f, err := os.OpenFile("./testlogdata/log_0", os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile("log/log_0", os.O_APPEND|os.O_WRONLY, 0644)
 	require.NoError(t, err)
 	f.Write([]byte("corrupted data"))
 	f.Close()
 
 	// try to reload - should fail due to checksum mismatch
 	_, err = NewWAL(Config{
-		Dir:              "./testlogdata",
 		Prefix:           "log_",
 		SegmentThreshold: 10,
 		MaxSegments:      5,
@@ -421,12 +413,12 @@ func TestChecksum_Corrupted(t *testing.T) {
 	})
 	require.Error(t, err)
 
-	require.NoError(t, os.RemoveAll("./testlogdata"))
+	require.NoError(t, os.RemoveAll("log"))
 }
 
 func TestChecksum_Check_Segment_Files(t *testing.T) {
+	testLogDir(t)
 	log, err := NewWAL(Config{
-		Dir:              "./testlogdata",
 		Prefix:           "log_",
 		SegmentThreshold: 1,
 		MaxSegments:      5,
@@ -447,7 +439,7 @@ func TestChecksum_Check_Segment_Files(t *testing.T) {
 	}
 
 	// find all segment files (no more separate checksum files)
-	files, err := os.ReadDir("./testlogdata")
+	files, err := os.ReadDir("log")
 	require.NoError(t, err)
 
 	countOfSegments := 0
@@ -460,12 +452,12 @@ func TestChecksum_Check_Segment_Files(t *testing.T) {
 
 	require.Equal(t, 5, countOfSegments)
 
-	require.NoError(t, os.RemoveAll("./testlogdata"))
+	require.NoError(t, os.RemoveAll("log"))
 }
 
 func TestChecksum_UnsafeRecover(t *testing.T) {
+	testLogDir(t)
 	log, err := NewWAL(Config{
-		Dir:              "./testlogdata",
 		Prefix:           "log_",
 		SegmentThreshold: 2,
 		MaxSegments:      5,
@@ -479,33 +471,33 @@ func TestChecksum_UnsafeRecover(t *testing.T) {
 
 	// close and corrupt the data by writing some garbage to the segment file
 	log.Close()
-	f, err := os.OpenFile("./testlogdata/log_4", os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile("log/log_4", os.O_APPEND|os.O_WRONLY, 0644)
 	require.NoError(t, err)
 	f.Write([]byte("corrupted data"))
 	f.Close()
 
 	// recover - should cut the garbage off the last segment
-	result, err := UnsafeRecover("./testlogdata", "log_")
+	result, err := UnsafeRecover("log_")
 	require.NoError(t, err)
-	require.Equal(t, RecoverResult{Truncated: "testlogdata/log_4", LastIndex: 10}, result)
+	require.Equal(t, RecoverResult{Truncated: "log/log_4", LastIndex: 10}, result)
 
-	log, err = NewWAL(Config{Dir: "./testlogdata", Prefix: "log_", SegmentThreshold: 2, MaxSegments: 5})
+	log, err = NewWAL(Config{Prefix: "log_", SegmentThreshold: 2, MaxSegments: 5})
 	require.NoError(t, err)
 	require.Equal(t, uint64(10), log.CurrentIndex())
 	require.NoError(t, log.Close())
 
-	require.NoError(t, os.RemoveAll("./testlogdata"))
+	require.NoError(t, os.RemoveAll("log"))
 }
 func TestWriteTombstone(t *testing.T) {
+	testLogDir(t)
 	log, err := NewWAL(Config{
-		Dir:              "./testlogdata",
 		Prefix:           "log_",
 		SegmentThreshold: 10,
 		MaxSegments:      5,
 		IsInSyncDiskMode: false,
 	})
 	require.NoError(t, err)
-	defer os.RemoveAll("./testlogdata")
+	defer os.RemoveAll("log")
 
 	t.Run("WriteTombstone for non-existent record returns nil", func(t *testing.T) {
 		// try to write tombstone for non-existent record
@@ -603,9 +595,8 @@ func TestWriteTombstone(t *testing.T) {
 }
 
 func TestWriteBatchAcceptsUnsortedSequentialRecords(t *testing.T) {
-	dir := t.TempDir()
+	testLogDir(t)
 	wal, err := NewWAL(Config{
-		Dir:              dir,
 		Prefix:           "log_",
 		SegmentThreshold: 10,
 		MaxSegments:      5,
@@ -624,9 +615,8 @@ func TestWriteBatchAcceptsUnsortedSequentialRecords(t *testing.T) {
 }
 
 func TestWriteBatch_NonSequentialWithCurrentIndex(t *testing.T) {
-	dir := t.TempDir()
+	testLogDir(t)
 	wal, err := NewWAL(Config{
-		Dir:              dir,
 		Prefix:           "log_",
 		SegmentThreshold: 10,
 		MaxSegments:      5,
@@ -647,11 +637,10 @@ func TestWriteBatch_NonSequentialWithCurrentIndex(t *testing.T) {
 }
 
 func TestWriteBatch_RotateWhenTmpIndexAlreadyFull(t *testing.T) {
-	dir := t.TempDir()
+	testLogDir(t)
 	segmentThreshold := 3
 
 	wal, err := NewWAL(Config{
-		Dir:              dir,
 		Prefix:           "log_",
 		SegmentThreshold: segmentThreshold,
 		MaxSegments:      10,
@@ -683,9 +672,8 @@ func TestWriteBatch_RotateWhenTmpIndexAlreadyFull(t *testing.T) {
 }
 
 func TestWriteBatchDoesNotMutateInputBatch(t *testing.T) {
-	dir := t.TempDir()
+	testLogDir(t)
 	wal, err := NewWAL(Config{
-		Dir:              dir,
 		Prefix:           "log_",
 		SegmentThreshold: 10,
 		MaxSegments:      5,
@@ -707,9 +695,8 @@ func TestWriteBatchDoesNotMutateInputBatch(t *testing.T) {
 }
 
 func TestRotationThresholdCountsAppendedRecords(t *testing.T) {
-	dir := t.TempDir()
+	testLogDir(t)
 	wal, err := NewWAL(Config{
-		Dir:              dir,
 		Prefix:           "log_",
 		SegmentThreshold: 2,
 		MaxSegments:      10,
@@ -725,22 +712,22 @@ func TestRotationThresholdCountsAppendedRecords(t *testing.T) {
 	require.NoError(t, wal.WriteTombstone(1))
 	require.NoError(t, wal.WriteTombstone(1))
 
-	require.FileExists(t, segmentPath(dir, "log_", 0))
-	require.FileExists(t, segmentPath(dir, "log_", 1))
-	require.FileExists(t, segmentPath(dir, "log_", 2))
+	require.FileExists(t, segmentPath(logDir, "log_", 0))
+	require.FileExists(t, segmentPath(logDir, "log_", 1))
+	require.FileExists(t, segmentPath(logDir, "log_", 2))
 }
 
 func TestOpenTruncatesPartialLastFrame(t *testing.T) {
-	dir := t.TempDir()
-	path := segmentPath(dir, "log_", 0)
-	writeRecords(t, dir, 100, 3)
+	testLogDir(t)
+	path := segmentPath(logDir, "log_", 0)
+	writeRecords(t, 100, 3)
 	validSize := fileSize(t, path)
 
 	frame, err := codec{}.marshal(NewRecord(4, "key", []byte("value")))
 	require.NoError(t, err)
 	appendToSegment(t, path, frame[:len(frame)/2])
 
-	log, err := NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
+	log, err := NewWAL(Config{Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
 	require.NoError(t, err)
 	require.Equal(t, uint64(3), log.CurrentIndex())
 	require.Equal(t, validSize, fileSize(t, path))
@@ -748,7 +735,7 @@ func TestOpenTruncatesPartialLastFrame(t *testing.T) {
 	require.NoError(t, log.Write(NewRecord(4, "key", []byte("value"))))
 	require.NoError(t, log.Close())
 
-	log, err = NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
+	log, err = NewWAL(Config{Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
 	require.NoError(t, err)
 	defer log.Close()
 	require.Equal(t, uint64(4), log.CurrentIndex())
@@ -758,14 +745,14 @@ func TestOpenTruncatesPartialLastFrame(t *testing.T) {
 }
 
 func TestOpenTruncatesZeroFilledTail(t *testing.T) {
-	dir := t.TempDir()
-	path := segmentPath(dir, "log_", 0)
-	writeRecords(t, dir, 100, 3)
+	testLogDir(t)
+	path := segmentPath(logDir, "log_", 0)
+	writeRecords(t, 100, 3)
 	validSize := fileSize(t, path)
 
 	appendToSegment(t, path, make([]byte, 64))
 
-	log, err := NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
+	log, err := NewWAL(Config{Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
 	require.NoError(t, err)
 	defer log.Close()
 	require.Equal(t, uint64(3), log.CurrentIndex())
@@ -773,9 +760,9 @@ func TestOpenTruncatesZeroFilledTail(t *testing.T) {
 }
 
 func TestOpenTruncatesBrokenFrameAtEOF(t *testing.T) {
-	dir := t.TempDir()
-	path := segmentPath(dir, "log_", 0)
-	writeRecords(t, dir, 100, 2)
+	testLogDir(t)
+	path := segmentPath(logDir, "log_", 0)
+	writeRecords(t, 100, 2)
 	validSize := fileSize(t, path)
 
 	frame, err := codec{}.marshal(NewRecord(3, "key", []byte("value")))
@@ -783,7 +770,7 @@ func TestOpenTruncatesBrokenFrameAtEOF(t *testing.T) {
 	frame[frameHeaderSize] ^= 0xFF
 	appendToSegment(t, path, frame)
 
-	log, err := NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
+	log, err := NewWAL(Config{Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
 	require.NoError(t, err)
 	defer log.Close()
 	require.Equal(t, uint64(2), log.CurrentIndex())
@@ -791,9 +778,9 @@ func TestOpenTruncatesBrokenFrameAtEOF(t *testing.T) {
 }
 
 func TestOpenFailsOnCorruptionInTheMiddle(t *testing.T) {
-	dir := t.TempDir()
-	path := segmentPath(dir, "log_", 0)
-	writeRecords(t, dir, 100, 3)
+	testLogDir(t)
+	path := segmentPath(logDir, "log_", 0)
+	writeRecords(t, 100, 3)
 
 	frame, err := codec{}.marshal(NewRecord(1, "key", []byte("value")))
 	require.NoError(t, err)
@@ -802,35 +789,35 @@ func TestOpenFailsOnCorruptionInTheMiddle(t *testing.T) {
 	data[len(frame)+frameHeaderSize] ^= 0xFF // payload of the second frame
 	require.NoError(t, os.WriteFile(path, data, 0644))
 
-	_, err = NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
+	_, err = NewWAL(Config{Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "checksum mismatch")
 	require.Equal(t, int64(len(data)), fileSize(t, path))
 }
 
 func TestOpenFailsOnTornTailInNotLastSegment(t *testing.T) {
-	dir := t.TempDir()
-	path := segmentPath(dir, "log_", 0)
-	writeRecords(t, dir, 2, 3)
+	testLogDir(t)
+	path := segmentPath(logDir, "log_", 0)
+	writeRecords(t, 2, 3)
 
 	require.NoError(t, os.Truncate(path, fileSize(t, path)-1))
 
-	_, err := NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 2, IsInSyncDiskMode: true})
+	_, err := NewWAL(Config{Prefix: "log_", SegmentThreshold: 2, IsInSyncDiskMode: true})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "partial frame")
 }
 
 func TestOpenTruncatesHeaderOnlyTail(t *testing.T) {
-	dir := t.TempDir()
-	path := segmentPath(dir, "log_", 0)
-	writeRecords(t, dir, 100, 3)
+	testLogDir(t)
+	path := segmentPath(logDir, "log_", 0)
+	writeRecords(t, 100, 3)
 	validSize := fileSize(t, path)
 
 	frame, err := codec{}.marshal(NewRecord(4, "key", []byte("value")))
 	require.NoError(t, err)
 	appendToSegment(t, path, frame[:frameHeaderSize])
 
-	log, err := NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
+	log, err := NewWAL(Config{Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
 	require.NoError(t, err)
 	defer log.Close()
 	require.Equal(t, uint64(3), log.CurrentIndex())
@@ -838,47 +825,47 @@ func TestOpenTruncatesHeaderOnlyTail(t *testing.T) {
 }
 
 func TestOpenFailsOnGapBetweenSegments(t *testing.T) {
-	dir := t.TempDir()
-	writeRecords(t, dir, 2, 6)
-	require.NoError(t, os.Remove(segmentPath(dir, "log_", 1)))
+	testLogDir(t)
+	writeRecords(t, 2, 6)
+	require.NoError(t, os.Remove(segmentPath(logDir, "log_", 1)))
 
-	_, err := NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 2, IsInSyncDiskMode: true})
+	_, err := NewWAL(Config{Prefix: "log_", SegmentThreshold: 2, IsInSyncDiskMode: true})
 	require.ErrorIs(t, err, ErrIndexGap)
 }
 
 func TestOpenFailsOnGapInsideSegment(t *testing.T) {
-	dir := t.TempDir()
-	path := segmentPath(dir, "log_", 0)
-	writeRecords(t, dir, 100, 2)
+	testLogDir(t)
+	path := segmentPath(logDir, "log_", 0)
+	writeRecords(t, 100, 2)
 
 	frame, err := codec{}.marshal(NewRecord(4, "key", []byte("value")))
 	require.NoError(t, err)
 	appendToSegment(t, path, frame)
 	size := fileSize(t, path)
 
-	_, err = NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
+	_, err = NewWAL(Config{Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
 	require.ErrorIs(t, err, ErrIndexGap)
 	require.Equal(t, size, fileSize(t, path))
 }
 
 func TestUnsafeRecoverDropsEverythingAfterBrokenFirstFrame(t *testing.T) {
-	dir := t.TempDir()
-	writeRecords(t, dir, 2, 6)
+	testLogDir(t)
+	writeRecords(t, 2, 6)
 
-	path := segmentPath(dir, "log_", 1)
+	path := segmentPath(logDir, "log_", 1)
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	data[frameHeaderSize] ^= 0xFF // payload of the first frame
 	require.NoError(t, os.WriteFile(path, data, 0644))
 
-	result, err := UnsafeRecover(dir, "log_")
+	result, err := UnsafeRecover("log_")
 	require.NoError(t, err)
 	require.Equal(t, RecoverResult{
-		Removed:   []string{segmentPath(dir, "log_", 1), segmentPath(dir, "log_", 2)},
+		Removed:   []string{segmentPath(logDir, "log_", 1), segmentPath(logDir, "log_", 2)},
 		LastIndex: 2,
 	}, result)
 
-	log, err := NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 2, IsInSyncDiskMode: true})
+	log, err := NewWAL(Config{Prefix: "log_", SegmentThreshold: 2, IsInSyncDiskMode: true})
 	require.NoError(t, err)
 	defer log.Close()
 	require.Equal(t, uint64(2), log.CurrentIndex())
@@ -886,10 +873,10 @@ func TestUnsafeRecoverDropsEverythingAfterBrokenFirstFrame(t *testing.T) {
 }
 
 func TestUnsafeRecoverTruncatesAtBrokenFrameInTheMiddle(t *testing.T) {
-	dir := t.TempDir()
-	writeRecords(t, dir, 2, 6)
+	testLogDir(t)
+	writeRecords(t, 2, 6)
 
-	path := segmentPath(dir, "log_", 1)
+	path := segmentPath(logDir, "log_", 1)
 	frame, err := codec{}.marshal(NewRecord(3, "key", []byte("value")))
 	require.NoError(t, err)
 	data, err := os.ReadFile(path)
@@ -897,56 +884,57 @@ func TestUnsafeRecoverTruncatesAtBrokenFrameInTheMiddle(t *testing.T) {
 	data[len(frame)+frameHeaderSize] ^= 0xFF // payload of the second frame
 	require.NoError(t, os.WriteFile(path, data, 0644))
 
-	result, err := UnsafeRecover(dir, "log_")
+	result, err := UnsafeRecover("log_")
 	require.NoError(t, err)
 	require.Equal(t, RecoverResult{
 		Truncated: path,
-		Removed:   []string{segmentPath(dir, "log_", 2)},
+		Removed:   []string{segmentPath(logDir, "log_", 2)},
 		LastIndex: 3,
 	}, result)
 	require.Equal(t, int64(len(frame)), fileSize(t, path))
 
-	log, err := NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 2, IsInSyncDiskMode: true})
+	log, err := NewWAL(Config{Prefix: "log_", SegmentThreshold: 2, IsInSyncDiskMode: true})
 	require.NoError(t, err)
 	defer log.Close()
 	require.Equal(t, uint64(3), log.CurrentIndex())
 }
 
 func TestUnsafeRecoverCutsLogAtGapBetweenSegments(t *testing.T) {
-	dir := t.TempDir()
-	writeRecords(t, dir, 2, 6)
-	require.NoError(t, os.Remove(segmentPath(dir, "log_", 1)))
+	testLogDir(t)
+	writeRecords(t, 2, 6)
+	require.NoError(t, os.Remove(segmentPath(logDir, "log_", 1)))
 
-	result, err := UnsafeRecover(dir, "log_")
+	result, err := UnsafeRecover("log_")
 	require.NoError(t, err)
 	require.Equal(t, RecoverResult{
-		Removed:   []string{segmentPath(dir, "log_", 2)},
+		Removed:   []string{segmentPath(logDir, "log_", 2)},
 		LastIndex: 2,
 	}, result)
 
-	log, err := NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 2, IsInSyncDiskMode: true})
+	log, err := NewWAL(Config{Prefix: "log_", SegmentThreshold: 2, IsInSyncDiskMode: true})
 	require.NoError(t, err)
 	defer log.Close()
 	require.Equal(t, uint64(2), log.CurrentIndex())
 }
 
 func TestUnsafeRecoverKeepsValidLogWithTombstones(t *testing.T) {
-	dir := t.TempDir()
-	writeRecords(t, dir, 2, 4)
+	testLogDir(t)
+	writeRecords(t, 2, 4)
 
-	log, err := NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 2, IsInSyncDiskMode: true})
+	log, err := NewWAL(Config{Prefix: "log_", SegmentThreshold: 2, IsInSyncDiskMode: true})
 	require.NoError(t, err)
 	require.NoError(t, log.WriteTombstone(1))
 	require.NoError(t, log.WriteTombstone(4))
 	require.NoError(t, log.Close())
 
-	result, err := UnsafeRecover(dir, "log_")
+	result, err := UnsafeRecover("log_")
 	require.NoError(t, err)
 	require.Equal(t, RecoverResult{LastIndex: 4}, result)
 }
 
 func TestTooLargeRecordDoesNotStopLog(t *testing.T) {
-	log, err := NewWAL(Config{Dir: t.TempDir(), Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
+	testLogDir(t)
+	log, err := NewWAL(Config{Prefix: "log_", SegmentThreshold: 100, IsInSyncDiskMode: true})
 	require.NoError(t, err)
 	defer log.Close()
 
@@ -959,27 +947,27 @@ func TestTooLargeRecordDoesNotStopLog(t *testing.T) {
 }
 
 func TestRotationFailureDoesNotStopLog(t *testing.T) {
+	testLogDir(t)
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions")
 	}
 
-	dir := t.TempDir()
-	config := Config{Dir: dir, Prefix: "log_", SegmentThreshold: 2, IsInSyncDiskMode: true}
+	config := Config{Prefix: "log_", SegmentThreshold: 2, IsInSyncDiskMode: true}
 	log, err := NewWAL(config)
 	require.NoError(t, err)
 
 	require.NoError(t, log.Write(NewRecord(1, "key1", []byte("value1"))))
 	require.NoError(t, log.Write(NewRecord(2, "key2", []byte("value2"))))
 
-	require.NoError(t, os.Chmod(dir, 0555))
-	t.Cleanup(func() { _ = os.Chmod(dir, 0755) })
+	require.NoError(t, os.Chmod(logDir, 0555))
+	t.Cleanup(func() { _ = os.Chmod(logDir, 0755) })
 
 	err = log.Write(NewRecord(3, "key3", []byte("value3")))
 	require.ErrorIs(t, err, errRotation)
 	require.NotErrorIs(t, err, ErrFailed)
 	require.Equal(t, uint64(2), log.CurrentIndex())
 
-	require.NoError(t, os.Chmod(dir, 0755))
+	require.NoError(t, os.Chmod(logDir, 0755))
 	require.NoError(t, log.Write(NewRecord(3, "key3", []byte("value3"))))
 	require.NoError(t, log.Write(NewRecord(4, "key4", []byte("value4"))))
 	require.NoError(t, log.Close())
@@ -996,9 +984,9 @@ func TestRotationFailureDoesNotStopLog(t *testing.T) {
 	}
 }
 
-func TestSegmentRemovalFailureDoesNotFailWrite(t *testing.T) {
-	dir := t.TempDir()
-	log, err := NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: 1, MaxSegments: 2, IsInSyncDiskMode: true})
+func TestSegmentRemovalFailureStopsLog(t *testing.T) {
+	testLogDir(t)
+	log, err := NewWAL(Config{Prefix: "log_", SegmentThreshold: 1, MaxSegments: 2, IsInSyncDiskMode: true})
 	require.NoError(t, err)
 	defer log.Close()
 
@@ -1006,21 +994,25 @@ func TestSegmentRemovalFailureDoesNotFailWrite(t *testing.T) {
 	require.NoError(t, log.Write(NewRecord(2, "key", []byte("value"))))
 
 	// a non-empty directory in place of the oldest segment makes its removal fail
-	oldest := segmentPath(dir, "log_", 0)
+	oldest := segmentPath(logDir, "log_", 0)
 	require.NoError(t, os.Remove(oldest))
 	require.NoError(t, os.Mkdir(oldest, 0755))
 	require.NoError(t, os.WriteFile(oldest+"/file", []byte("x"), 0644))
 
-	require.NoError(t, log.Write(NewRecord(3, "key", []byte("value"))))
-	require.NoError(t, log.Write(NewRecord(4, "key", []byte("value"))))
-	require.Equal(t, uint64(4), log.CurrentIndex())
+	err = log.Write(NewRecord(3, "key", []byte("value")))
+	require.ErrorIs(t, err, ErrFailed)
+	require.Contains(t, err.Error(), "failed to remove segment")
+	require.ErrorIs(t, log.Write(NewRecord(3, "key", []byte("value"))), ErrFailed)
+	require.Equal(t, uint64(2), log.CurrentIndex())
+	_, exists := log.segments.record(3)
+	require.False(t, exists)
 	require.DirExists(t, oldest)
 }
 
-func writeRecords(t *testing.T, dir string, threshold int, count uint64) {
+func writeRecords(t *testing.T, threshold int, count uint64) {
 	t.Helper()
 
-	log, err := NewWAL(Config{Dir: dir, Prefix: "log_", SegmentThreshold: threshold, IsInSyncDiskMode: true})
+	log, err := NewWAL(Config{Prefix: "log_", SegmentThreshold: threshold, IsInSyncDiskMode: true})
 	require.NoError(t, err)
 	for i := uint64(1); i <= count; i++ {
 		require.NoError(t, log.Write(NewRecord(i, "key", []byte("value"))))
@@ -1044,4 +1036,39 @@ func fileSize(t *testing.T, path string) int64 {
 	info, err := os.Stat(path)
 	require.NoError(t, err)
 	return info.Size()
+}
+
+func TestCloseReportsSyncFailure(t *testing.T) {
+	testLogDir(t)
+	w, err := NewWAL(Config{SegmentThreshold: 10})
+	require.NoError(t, err)
+	// A closed descriptor makes both Sync and Close fail without injected operations.
+	require.NoError(t, w.segments.active.file.Close())
+	err = w.Close()
+	require.ErrorIs(t, err, ErrFailed)
+	require.ErrorIs(t, err, os.ErrClosed)
+}
+
+func TestCloseAfterWriteFailure(t *testing.T) {
+	testLogDir(t)
+	w, err := NewWAL(Config{SegmentThreshold: 10})
+	require.NoError(t, err)
+	require.NoError(t, w.segments.active.file.Close())
+	file, err := os.Open(w.segments.active.Path())
+	require.NoError(t, err)
+	defer file.Close()
+	w.segments.active.file = file
+
+	require.ErrorIs(t, w.Write(NewRecord(1, "key", nil)), ErrFailed)
+	require.NoError(t, w.Close())
+	require.ErrorIs(t, file.Sync(), os.ErrClosed)
+}
+
+func testLogDir(t *testing.T) {
+	t.Helper()
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	dir := t.TempDir()
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { require.NoError(t, os.Chdir(cwd)) })
 }

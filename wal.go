@@ -1,6 +1,7 @@
 package gowal
 
 import (
+	stderrors "errors"
 	"fmt"
 	"iter"
 	"os"
@@ -11,11 +12,13 @@ import (
 	"github.com/pkg/errors"
 )
 
+const logDir = "log"
+
 var (
 	ErrExists             = errors.New("record with such index already exists")
 	ErrNonSequentialIndex = errors.New("record index must be next in sequence")
 
-	// ErrFailed is returned by all writes after a write or sync of the log has failed.
+	// ErrFailed is returned by all writes after writing, syncing or removing a segment has failed.
 	// The WAL must be closed and opened again.
 	ErrFailed = errors.New("wal is failed after an I/O error, reopen it")
 )
@@ -42,9 +45,6 @@ type Wal struct {
 
 // Config represents the configuration for the WAL (Write-Ahead Log).
 type Config struct {
-	// Dir is the directory where the log files will be stored.
-	Dir string
-
 	// Prefix is the prefix for the segment files.
 	Prefix string
 
@@ -58,19 +58,25 @@ type Config struct {
 	IsInSyncDiskMode bool
 }
 
-// NewWAL creates a new WAL with the given configuration.
+// NewWAL creates a WAL in ./log with the given configuration.
 //
 // A torn last frame in the last segment (left by a crash in the middle of a write) is truncated.
 // Corruption anywhere else returns an error, and so does a gap in indexes (ErrIndexGap).
 // Such a log can be cut to its valid prefix with UnsafeRecover.
 func NewWAL(config Config) (*Wal, error) {
-	if err := os.MkdirAll(config.Dir, 0755); err != nil {
+	if err := os.Mkdir(logDir, 0755); err != nil && !os.IsExist(err) {
 		return nil, errors.Wrap(err, "failed to create log directory")
+	}
+	if err := syncDir("."); err != nil {
+		return nil, err
 	}
 
 	segments, lastIndex, err := openSegmentSet(config)
 	if err != nil {
 		return nil, err
+	}
+	if err := syncDir(logDir); err != nil {
+		return nil, stderrors.Join(err, segments.close())
 	}
 
 	w := &Wal{
@@ -83,17 +89,18 @@ func NewWAL(config Config) (*Wal, error) {
 	return w, nil
 }
 
-// UnsafeRecover recovers the WAL in the given directory, so that NewWAL can open it.
+// UnsafeRecover recovers the WAL in ./log, so that NewWAL can open it.
 //
 // It cuts the log at the first broken frame or index gap and removes everything after it,
 // including all later segments. The remaining log is a contiguous prefix without holes.
 // It is unsafe because the dropped records are lost, even if they are valid.
 //
 // A broken frame or gap is not an error: it is reported in RecoverResult.
-// An error is returned only if the log files can't be read, truncated or removed.
-func UnsafeRecover(dir, segmentPrefix string) (RecoverResult, error) {
-	namer := segmentNamer{dir: dir, prefix: segmentPrefix}
-	segmentsNumbers, err := findSegmentNumbers(dir, namer)
+// An error is returned if the log files can't be read, truncated, removed or synced,
+// or if a directory change can't be synced.
+func UnsafeRecover(segmentPrefix string) (RecoverResult, error) {
+	namer := segmentNamer{dir: logDir, prefix: segmentPrefix}
+	segmentsNumbers, err := findSegmentNumbers(logDir, namer)
 	if err != nil {
 		return RecoverResult{}, errors.Wrap(err, "failed to find segment numbers")
 	}
@@ -284,14 +291,16 @@ func (c *Wal) PullIterator() (next func() (Record, bool), stop func()) {
 	return iter.Pull(c.Iterator())
 }
 
-// Close closes log file.
+// Close syncs pending records and closes the log.
 func (c *Wal) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	if err := c.segments.close(); err != nil {
-		return errors.Wrap(err, "failed to close log file")
+	var syncErr error
+	if c.failed == nil {
+		if err := c.segments.active.Sync(); err != nil {
+			syncErr = fmt.Errorf("%w: failed to sync on close: %w", ErrFailed, err)
+			c.failed = syncErr
+		}
 	}
-
-	return nil
+	return stderrors.Join(syncErr, c.segments.close())
 }

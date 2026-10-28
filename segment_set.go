@@ -1,9 +1,11 @@
 package gowal
 
 import (
+	stderrors "errors"
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 
 	"github.com/pkg/errors"
 )
@@ -24,9 +26,9 @@ type segmentSet struct {
 }
 
 func openSegmentSet(config Config) (*segmentSet, uint64, error) {
-	namer := segmentNamer{dir: config.Dir, prefix: config.Prefix}
+	namer := segmentNamer{dir: logDir, prefix: config.Prefix}
 
-	numbers, err := findSegmentNumbers(config.Dir, namer)
+	numbers, err := findSegmentNumbers(logDir, namer)
 	if err != nil {
 		return nil, 0, errors.Wrap(err, "failed to find segment numbers")
 	}
@@ -150,6 +152,9 @@ func (s *segmentSet) rotateIfNeeded() error {
 	if err != nil {
 		return fmt.Errorf("%w: failed to create new log file: %w", errRotation, err)
 	}
+	if err := syncDir(s.namer.dir); err != nil {
+		return stderrors.Join(err, active.Close())
+	}
 
 	old := s.active
 	maps.Copy(s.historicalIndex, old.index)
@@ -162,20 +167,17 @@ func (s *segmentSet) rotateIfNeeded() error {
 
 	_ = old.Close()
 
-	s.removeExtraSegments()
-
-	return nil
+	return s.removeExtraSegments()
 }
 
-// removeExtraSegments removes the oldest segments above the max limit.
-// A failed removal doesn't fail the write: the segment is kept and removed on the next rotation.
-func (s *segmentSet) removeExtraSegments() {
+func (s *segmentSet) removeExtraSegments() error {
 	for s.max > 0 && len(s.numbers) > s.max {
 		if err := s.removeSegment(s.numbers[0]); err != nil {
-			return
+			return err
 		}
 		s.numbers = s.numbers[1:]
 	}
+	return nil
 }
 
 func (s *segmentSet) removeSegment(number segmentNumber) error {
@@ -200,5 +202,13 @@ func removeSegmentFile(segmentPath string) error {
 	if err := os.Remove(segmentPath); err != nil && !os.IsNotExist(err) {
 		return errors.Wrapf(err, "failed to remove segment %s", segmentPath)
 	}
-	return nil
+	return syncDir(filepath.Dir(segmentPath))
+}
+
+func syncDir(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return errors.Wrapf(err, "failed to open directory %s", path)
+	}
+	return errors.Wrapf(stderrors.Join(f.Sync(), f.Close()), "failed to sync directory %s", path)
 }

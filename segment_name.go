@@ -37,10 +37,6 @@ func (n segmentNamer) parse(fileName string) (segmentNumber, bool, error) {
 }
 
 func findSegmentNumbers(dir string, namer segmentNamer) ([]segmentNumber, error) {
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, errors.Wrap(err, "failed to create dir for wal")
-	}
-
 	de, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read dir for wal")
