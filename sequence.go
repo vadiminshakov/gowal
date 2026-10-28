@@ -5,9 +5,9 @@ import "github.com/pkg/errors"
 // ErrIndexGap is returned when the log on disk is not a contiguous sequence of indexes.
 var ErrIndexGap = errors.New("gap in log indexes")
 
-// indexSequence checks that frames read from the log form a contiguous sequence.
-// A frame with an index not greater than the last one is a tombstone and is allowed.
-// The first frame of the log may have any index, because the oldest segments may have been removed.
+// indexSequence checks that records read from the log form a contiguous sequence.
+// A record with an index not greater than the last one is a tombstone and is allowed.
+// The first record of the log may have any index, because the oldest segments may have been removed.
 type indexSequence struct {
 	last    uint64
 	started bool

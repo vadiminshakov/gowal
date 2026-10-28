@@ -50,8 +50,30 @@ If the index does not continue the monotonic sequence, the function will return 
 
 The WAL is fail-stop: if writing or syncing the log fails, the write returns `ErrFailed` and all further writes return it too.
 The in-memory state keeps only the records written before the error. Close the WAL and open it again with `NewWAL`:
-the failed record may or may not be in the reopened log. A record that is too large (`ErrRecordTooLarge`) does not stop the WAL.
+the failed record or batch may or may not be in the reopened log. A record or batch that is too large (`ErrRecordTooLarge`) does not stop the WAL.
 Neither does a failure to create a new segment on rotation: nothing is written in this case, and the write can be retried.
+
+### Adding a batch
+
+`WriteBatch` writes all records in one frame with one CRC32 checksum. Recovery keeps the whole batch or drops it entirely; it never exposes a partial batch.
+
+```go
+err := wal.WriteBatch(gowal.NewBatch(
+    gowal.NewRecord(1, "first", []byte("value1")),
+    gowal.NewRecord(2, "second", []byte("value2")),
+))
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+Records are sorted by index before writing and must continue the log's sequence without gaps or duplicates.
+An empty batch is a no-op. The entire MessagePack payload, including all records and encoding overhead,
+must fit within 16 MiB. Larger batches return `ErrRecordTooLarge` before any rotation, deletion or write.
+A batch always stays in one segment and may take it past `SegmentThreshold`; the next write then rotates.
+
+Batch atomicity applies in both sync and async modes. Sync mode syncs each batch before returning success;
+async mode can lose recent batches on a crash. After an I/O error, recovery may retain or discard the failed batch as a whole.
 
 ### Retrieving a log entry
 
@@ -90,11 +112,13 @@ if err != nil {
 
 ### Recover corrupted WAL
 A torn last frame left by a crash in the middle of a write is truncated by `NewWAL` automatically.
+If that frame contains a batch, all records in that batch are dropped.
 Corruption anywhere else or a gap in indexes (`ErrIndexGap`, e.g. a segment file from the middle is lost) makes `NewWAL` return an error,
 because the records after it are valid and dropping them loses data.
 
 If you can't restore the log from elsewhere, you can cut it to its valid prefix by calling the `UnsafeRecover` function.
-It truncates the log at the first broken frame or index gap and removes everything after it, including all later segments:
+It truncates the log before the first broken frame or frame containing an index gap and removes everything after it,
+including the entire affected batch and all later segments:
 
 ```go
 result, err := gowal.UnsafeRecover("segment_")
@@ -107,7 +131,7 @@ log.Printf("Truncated: %q, removed: %v, last index: %d", result.Truncated, resul
 ### Configuration
 The behavior of the WAL can be configured using several configuration options (`Config` parameter in the `NewWAL` function):
 
- - `SegmentThreshold`: Maximum number of log entries per segment before rotation occurs. Default is 1000.
+ - `SegmentThreshold`: Number of log entries at which the next write rotates to a new segment. Batches are never split and may exceed this threshold. Default is 1000.
  - `MaxSegments`: Maximum number of segments to keep before the oldest segments are deleted. Default is 5.
  - `IsInSyncDiskMode`: When set to true, every successful write is synced to disk. In async mode (the default), recent writes can be lost on a crash; segments are synced before rotation and on successful Close. Segment creation and deletion always sync the directory, regardless of this setting. Creation of `./log` is persisted by syncing the current directory.
 
@@ -116,9 +140,9 @@ The behavior of the WAL can be configured using several configuration options (`
 GoWAL uses a segmented architecture with segment-owned indexing for efficient write and read operations:
 
 #### Segments
-Data is split into numbered files (`segment_0`, `segment_1`, etc.). Internally, each active segment owns its file descriptor and in-memory index. Each record contains:
-- Index, Key, Value
-- CRC32 checksum for integrity verification
+Data is split into numbered files (`segment_0`, `segment_1`, etc.). Internally, each active segment owns its file descriptor and in-memory index.
+Each frame contains a CRC32 checksum, payload length, a MessagePack array of records (`Index`, `Key`, `Value`), and a trailer.
+Single writes and tombstones use an array of one record; batches use one array containing all records.
 
 #### Segment Indexing
 - **active segment index**: In-memory index owned by the current active segment.
@@ -126,11 +150,11 @@ Data is split into numbered files (`segment_0`, `segment_1`, etc.). Internally, 
 
 #### Write Flow
 1. Check that the index continues the monotonic sequence
-2. Check if rotation is needed based on `SegmentThreshold`
-3. Calculate CRC32 checksum for the record
-4. Serialize record (with checksum) using MessagePack
-5. Write to current segment file
-6. Add entry to the active segment index
+2. Serialize all records into one MessagePack array, check the 16 MiB payload limit, and build a frame with its CRC32 checksum
+3. Check if rotation is needed based on `SegmentThreshold`
+4. Write the whole frame to the current segment file in one write
+5. Sync the file if sync mode is enabled
+6. Add all records to the active segment index
 
 #### Rotation & Segment Management
 When the active segment size exceeds `SegmentThreshold`:

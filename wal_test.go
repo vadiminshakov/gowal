@@ -723,7 +723,7 @@ func TestOpenTruncatesPartialLastFrame(t *testing.T) {
 	writeRecords(t, 100, 3)
 	validSize := fileSize(t, path)
 
-	frame, err := codec{}.marshal(NewRecord(4, "key", []byte("value")))
+	frame, err := codec{}.marshal([]Record{NewRecord(4, "key", []byte("value"))})
 	require.NoError(t, err)
 	appendToSegment(t, path, frame[:len(frame)/2])
 
@@ -765,7 +765,7 @@ func TestOpenTruncatesBrokenFrameAtEOF(t *testing.T) {
 	writeRecords(t, 100, 2)
 	validSize := fileSize(t, path)
 
-	frame, err := codec{}.marshal(NewRecord(3, "key", []byte("value")))
+	frame, err := codec{}.marshal([]Record{NewRecord(3, "key", []byte("value"))})
 	require.NoError(t, err)
 	frame[frameHeaderSize] ^= 0xFF
 	appendToSegment(t, path, frame)
@@ -782,7 +782,7 @@ func TestOpenFailsOnCorruptionInTheMiddle(t *testing.T) {
 	path := segmentPath(logDir, "log_", 0)
 	writeRecords(t, 100, 3)
 
-	frame, err := codec{}.marshal(NewRecord(1, "key", []byte("value")))
+	frame, err := codec{}.marshal([]Record{NewRecord(1, "key", []byte("value"))})
 	require.NoError(t, err)
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -813,7 +813,7 @@ func TestOpenTruncatesHeaderOnlyTail(t *testing.T) {
 	writeRecords(t, 100, 3)
 	validSize := fileSize(t, path)
 
-	frame, err := codec{}.marshal(NewRecord(4, "key", []byte("value")))
+	frame, err := codec{}.marshal([]Record{NewRecord(4, "key", []byte("value"))})
 	require.NoError(t, err)
 	appendToSegment(t, path, frame[:frameHeaderSize])
 
@@ -838,7 +838,7 @@ func TestOpenFailsOnGapInsideSegment(t *testing.T) {
 	path := segmentPath(logDir, "log_", 0)
 	writeRecords(t, 100, 2)
 
-	frame, err := codec{}.marshal(NewRecord(4, "key", []byte("value")))
+	frame, err := codec{}.marshal([]Record{NewRecord(4, "key", []byte("value"))})
 	require.NoError(t, err)
 	appendToSegment(t, path, frame)
 	size := fileSize(t, path)
@@ -877,7 +877,7 @@ func TestUnsafeRecoverTruncatesAtBrokenFrameInTheMiddle(t *testing.T) {
 	writeRecords(t, 2, 6)
 
 	path := segmentPath(logDir, "log_", 1)
-	frame, err := codec{}.marshal(NewRecord(3, "key", []byte("value")))
+	frame, err := codec{}.marshal([]Record{NewRecord(3, "key", []byte("value"))})
 	require.NoError(t, err)
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)

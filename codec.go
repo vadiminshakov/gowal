@@ -1,6 +1,7 @@
 package gowal
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -17,19 +18,24 @@ const (
 	maxFrameDataSize uint32 = 16 * 1024 * 1024 // 16 MiB
 )
 
-// ErrRecordTooLarge is returned when an encoded record exceeds the maximum frame size.
+// ErrRecordTooLarge is returned when an encoded record or batch exceeds 16 MiB.
 var ErrRecordTooLarge = errors.New("record too large")
 
 var (
 	errPartialFrame     = errors.New("partial frame")
 	errChecksumMismatch = errors.New("checksum mismatch")
 	errInvalidTrailer   = errors.New("invalid frame trailer")
+	errEmptyFrame       = errors.New("frame contains no records")
 )
 
 type codec struct{}
 
-func (codec) marshal(r Record) ([]byte, error) {
-	data, err := msgpack.Marshal(r)
+func (codec) marshal(records []Record) ([]byte, error) {
+	if len(records) == 0 {
+		return nil, errEmptyFrame
+	}
+
+	data, err := msgpack.Marshal(records)
 	if err != nil {
 		return nil, err
 	}
@@ -46,19 +52,19 @@ func (codec) marshal(r Record) ([]byte, error) {
 	return frame, nil
 }
 
-func (codec) unmarshal(r io.Reader) (Record, error) {
+func (codec) unmarshal(r io.Reader) ([]Record, error) {
 	var hdr [frameHeaderSize]byte
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {
 		if err == io.ErrUnexpectedEOF {
-			return Record{}, fmt.Errorf("%w header", errPartialFrame)
+			return nil, fmt.Errorf("%w header", errPartialFrame)
 		}
-		return Record{}, err
+		return nil, err
 	}
 
 	wantCRC := binary.BigEndian.Uint32(hdr[0:4])
 	dataLen := binary.BigEndian.Uint32(hdr[4:8])
 	if dataLen > maxFrameDataSize {
-		return Record{}, fmt.Errorf("frame data too large: %d > %d", dataLen, maxFrameDataSize)
+		return nil, fmt.Errorf("frame data too large: %d > %d", dataLen, maxFrameDataSize)
 	}
 
 	data := make([]byte, dataLen)
@@ -66,31 +72,49 @@ func (codec) unmarshal(r io.Reader) (Record, error) {
 		// ReadFull returns io.EOF if it read nothing. The header is already read,
 		// so the file ends right after the header: this is a partial frame, not the end of the log.
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			return Record{}, fmt.Errorf("%w data", errPartialFrame)
+			return nil, fmt.Errorf("%w data", errPartialFrame)
 		}
-		return Record{}, err
+		return nil, err
 	}
 
 	var trail [frameTrailerSize]byte
 	if _, err := io.ReadFull(r, trail[:]); err != nil {
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			return Record{}, fmt.Errorf("%w trailer", errPartialFrame)
+			return nil, fmt.Errorf("%w trailer", errPartialFrame)
 		}
-		return Record{}, err
+		return nil, err
 	}
 
 	if binary.BigEndian.Uint32(trail[:]) != frameTrailer {
-		return Record{}, errInvalidTrailer
+		return nil, errInvalidTrailer
 	}
 
 	if crc32.ChecksumIEEE(data) != wantCRC {
-		return Record{}, errChecksumMismatch
+		return nil, errChecksumMismatch
 	}
 
-	var rec Record
-	if err := msgpack.Unmarshal(data, &rec); err != nil {
-		return Record{}, err
+	payload := bytes.NewReader(data)
+	decoder := msgpack.NewDecoder(payload)
+	msgpackHeaderRecordCount, err := decoder.DecodeArrayLen()
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode frame record count: %w", err)
+	}
+	if msgpackHeaderRecordCount <= 0 {
+		return nil, errEmptyFrame
 	}
 
-	return rec, nil
+	if msgpackHeaderRecordCount > payload.Len() {
+		return nil, fmt.Errorf("invalid frame record count: %d", msgpackHeaderRecordCount)
+	}
+	records := make([]Record, msgpackHeaderRecordCount)
+	for i := range records {
+		if err := decoder.Decode(&records[i]); err != nil {
+			return nil, fmt.Errorf("failed to decode frame record %d: %w", i, err)
+		}
+	}
+	if payload.Len() != 0 {
+		return nil, errors.New("unexpected trailing frame data")
+	}
+
+	return records, nil
 }

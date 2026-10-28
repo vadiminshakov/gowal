@@ -93,6 +93,7 @@ func NewWAL(config Config) (*Wal, error) {
 //
 // It cuts the log at the first broken frame or index gap and removes everything after it,
 // including all later segments. The remaining log is a contiguous prefix without holes.
+// If a frame contains a batch, the entire batch is dropped.
 // It is unsafe because the dropped records are lost, even if they are valid.
 //
 // A broken frame or gap is not an error: it is reported in RecoverResult.
@@ -154,7 +155,9 @@ func (c *Wal) Write(record Record) error {
 	return nil
 }
 
-// WriteBatch appends a batch of records to the WAL in a single operation.
+// WriteBatch appends a batch in one frame, so recovery keeps or drops it as a whole.
+// The encoded batch must not exceed 16 MiB; otherwise it returns ErrRecordTooLarge
+// without changing the log. An empty batch is a no-op.
 func (c *Wal) WriteBatch(batch Batch) error {
 	if batch.Len() == 0 {
 		return nil
@@ -231,7 +234,7 @@ func (c *Wal) WriteTombstone(index uint64) error {
 }
 
 // writeRecords is an internal method that encodes and writes records to the log.
-// Any error except a too large record or a failed creation of a new segment stops the log:
+// Any error except a too large record or batch or a failed creation of a new segment stops the log:
 // the file state after a failed write or sync is unknown, and retrying fsync is unsafe
 // because the kernel may have already dropped the dirty pages.
 func (c *Wal) writeRecords(records []Record) error {

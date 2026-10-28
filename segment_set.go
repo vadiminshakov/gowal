@@ -86,11 +86,16 @@ func openSegments(numbers []segmentNumber, namer segmentNamer) (*segment, map[ui
 }
 
 func (s *segmentSet) append(records []Record, sync bool) error {
+	frame, err := codec{}.marshal(records)
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal records")
+	}
+
 	if err := s.rotateIfNeeded(); err != nil {
 		return err
 	}
 
-	if err := s.active.Append(records, sync); err != nil {
+	if err := s.active.Append(records, frame, sync); err != nil {
 		return err
 	}
 

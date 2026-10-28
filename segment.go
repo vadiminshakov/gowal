@@ -16,8 +16,6 @@ type segment struct {
 	index   map[uint64]Record
 	lastIdx uint64
 	entries int
-	buf     bytes.Buffer
-	codec   codec
 }
 
 // openSegment opens the segment file and loads its index.
@@ -31,9 +29,8 @@ func openSegment(segmentPath string, repairTornTail bool, seq *indexSequence) (*
 	}
 
 	s := &segment{
-		path:  segmentPath,
-		file:  file,
-		codec: codec{},
+		path: segmentPath,
+		file: file,
 	}
 
 	index, lastIndex, entries, err := s.loadIndex(repairTornTail, seq)
@@ -49,21 +46,10 @@ func openSegment(segmentPath string, repairTornTail bool, seq *indexSequence) (*
 	return s, nil
 }
 
-// Append writes records to the segment file and, if sync is set, syncs it.
-func (s *segment) Append(records []Record, sync bool) error {
-	s.buf.Reset()
-	s.buf.Grow(len(records) * 150)
-
-	for _, record := range records {
-		frame, err := s.codec.marshal(record)
-		if err != nil {
-			return errors.Wrap(err, "failed to marshal record")
-		}
-		s.buf.Write(frame)
-	}
-
-	if _, err := s.file.Write(s.buf.Bytes()); err != nil {
-		return errors.Wrap(err, "failed to write record to log")
+// Append writes the pre-encoded frame for records and, if sync is set, syncs it.
+func (s *segment) Append(records []Record, frame []byte, sync bool) error {
+	if _, err := s.file.Write(frame); err != nil {
+		return errors.Wrap(err, "failed to write records to log")
 	}
 
 	if sync {
@@ -141,24 +127,31 @@ func (s *segment) loadIndex(repairTornTail bool, seq *indexSequence) (map[uint64
 }
 
 // scanFrames reads frames from r until EOF, the first broken frame or the first index gap.
+// All records in a frame must pass validation before any of them are applied.
 // It returns the size of the valid prefix and the error that stopped the scan, or nil at a clean EOF.
 func scanFrames(r io.Reader, seq *indexSequence, fn func(Record)) (int64, error) {
 	reader := &countingReader{r: bufio.NewReader(r)}
 	var validSize int64
 
 	for {
-		record, err := codec{}.unmarshal(reader)
+		records, err := codec{}.unmarshal(reader)
 		if err == io.EOF {
 			return validSize, nil
 		}
 		if err != nil {
 			return validSize, err
 		}
-		if err := seq.next(record.Index); err != nil {
-			return validSize, err
+		nextSeq := *seq
+		for _, record := range records {
+			if err := nextSeq.next(record.Index); err != nil {
+				return validSize, err
+			}
 		}
 
-		fn(record)
+		*seq = nextSeq
+		for _, record := range records {
+			fn(record)
+		}
 		validSize = reader.n
 	}
 }
