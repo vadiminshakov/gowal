@@ -1,0 +1,20 @@
+readme.md
+  h_786988a78af769 22,28,125,135,138
+segment_set.go
+  h_786988a78af769 29,31
+wal.go
+  h_786988a78af769 8,49-52,66,72-73,75-76,84,98-126,136-138
+wal_test.go
+  h_786988a78af769 480,861,887,907,930
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "42495a9e768dc697e2b66048b013cc6e28a0f44d",
+  "prompts": {},
+  "humans": {
+    "h_786988a78af769": {
+      "author": "Vadim Inshakov <vadiminshakov@gmail.com>"
+    }
+  }
+}
