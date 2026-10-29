@@ -477,7 +477,7 @@ func TestChecksum_UnsafeRecover(t *testing.T) {
 	f.Close()
 
 	// recover - should cut the garbage off the last segment
-	result, err := UnsafeRecover("log_")
+	result, err := UnsafeRecover(logDir, "log_")
 	require.NoError(t, err)
 	require.Equal(t, RecoverResult{Truncated: "log/log_4", LastIndex: 10}, result)
 
@@ -858,7 +858,7 @@ func TestUnsafeRecoverDropsEverythingAfterBrokenFirstFrame(t *testing.T) {
 	data[frameHeaderSize] ^= 0xFF // payload of the first frame
 	require.NoError(t, os.WriteFile(path, data, 0644))
 
-	result, err := UnsafeRecover("log_")
+	result, err := UnsafeRecover(logDir, "log_")
 	require.NoError(t, err)
 	require.Equal(t, RecoverResult{
 		Removed:   []string{segmentPath(logDir, "log_", 1), segmentPath(logDir, "log_", 2)},
@@ -884,7 +884,7 @@ func TestUnsafeRecoverTruncatesAtBrokenFrameInTheMiddle(t *testing.T) {
 	data[len(frame)+frameHeaderSize] ^= 0xFF // payload of the second frame
 	require.NoError(t, os.WriteFile(path, data, 0644))
 
-	result, err := UnsafeRecover("log_")
+	result, err := UnsafeRecover(logDir, "log_")
 	require.NoError(t, err)
 	require.Equal(t, RecoverResult{
 		Truncated: path,
@@ -904,7 +904,7 @@ func TestUnsafeRecoverCutsLogAtGapBetweenSegments(t *testing.T) {
 	writeRecords(t, 2, 6)
 	require.NoError(t, os.Remove(segmentPath(logDir, "log_", 1)))
 
-	result, err := UnsafeRecover("log_")
+	result, err := UnsafeRecover(logDir, "log_")
 	require.NoError(t, err)
 	require.Equal(t, RecoverResult{
 		Removed:   []string{segmentPath(logDir, "log_", 2)},
@@ -927,7 +927,7 @@ func TestUnsafeRecoverKeepsValidLogWithTombstones(t *testing.T) {
 	require.NoError(t, log.WriteTombstone(4))
 	require.NoError(t, log.Close())
 
-	result, err := UnsafeRecover("log_")
+	result, err := UnsafeRecover(logDir, "log_")
 	require.NoError(t, err)
 	require.Equal(t, RecoverResult{LastIndex: 4}, result)
 }

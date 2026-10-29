@@ -26,9 +26,9 @@ type segmentSet struct {
 }
 
 func openSegmentSet(config Config) (*segmentSet, uint64, error) {
-	namer := segmentNamer{dir: logDir, prefix: config.Prefix}
+	namer := segmentNamer{dir: config.Dir, prefix: config.Prefix}
 
-	numbers, err := findSegmentNumbers(logDir, namer)
+	numbers, err := findSegmentNumbers(config.Dir, namer)
 	if err != nil {
 		return nil, 0, errors.Wrap(err, "failed to find segment numbers")
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"iter"
 	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -45,6 +46,10 @@ type Wal struct {
 
 // Config represents the configuration for the WAL (Write-Ahead Log).
 type Config struct {
+	// Dir is the directory where the log files will be stored.
+	// If empty, ./log is used.
+	Dir string
+
 	// Prefix is the prefix for the segment files.
 	Prefix string
 
@@ -58,16 +63,17 @@ type Config struct {
 	IsInSyncDiskMode bool
 }
 
-// NewWAL creates a WAL in ./log with the given configuration.
+// NewWAL creates a WAL in Config.Dir, or in ./log if Config.Dir is empty.
 //
 // A torn last frame in the last segment (left by a crash in the middle of a write) is truncated.
 // Corruption anywhere else returns an error, and so does a gap in indexes (ErrIndexGap).
 // Such a log can be cut to its valid prefix with UnsafeRecover.
 func NewWAL(config Config) (*Wal, error) {
-	if err := os.Mkdir(logDir, 0755); err != nil && !os.IsExist(err) {
-		return nil, errors.Wrap(err, "failed to create log directory")
+	if config.Dir == "" {
+		config.Dir = logDir
 	}
-	if err := syncDir("."); err != nil {
+
+	if err := createLogDir(config.Dir); err != nil {
 		return nil, err
 	}
 
@@ -75,7 +81,7 @@ func NewWAL(config Config) (*Wal, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syncDir(logDir); err != nil {
+	if err := syncDir(config.Dir); err != nil {
 		return nil, stderrors.Join(err, segments.close())
 	}
 
@@ -89,7 +95,35 @@ func NewWAL(config Config) (*Wal, error) {
 	return w, nil
 }
 
-// UnsafeRecover recovers the WAL in ./log, so that NewWAL can open it.
+// createLogDir creates dir and syncs the parent of every directory that may have been created.
+func createLogDir(dir string) error {
+	var missing []string
+	for current := filepath.Clean(dir); ; current = filepath.Dir(current) {
+		_, err := os.Stat(current)
+		if err == nil || !os.IsNotExist(err) {
+			break
+		}
+
+		missing = append(missing, current)
+		if filepath.Dir(current) == current {
+			break
+		}
+	}
+
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return errors.Wrap(err, "failed to create log directory")
+	}
+
+	for i := len(missing) - 1; i >= 0; i-- {
+		if err := syncDir(filepath.Dir(missing[i])); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// UnsafeRecover recovers the WAL in dir, so that NewWAL can open it.
 //
 // It cuts the log at the first broken frame or index gap and removes everything after it,
 // including all later segments. The remaining log is a contiguous prefix without holes.
@@ -99,9 +133,9 @@ func NewWAL(config Config) (*Wal, error) {
 // A broken frame or gap is not an error: it is reported in RecoverResult.
 // An error is returned if the log files can't be read, truncated, removed or synced,
 // or if a directory change can't be synced.
-func UnsafeRecover(segmentPrefix string) (RecoverResult, error) {
-	namer := segmentNamer{dir: logDir, prefix: segmentPrefix}
-	segmentsNumbers, err := findSegmentNumbers(logDir, namer)
+func UnsafeRecover(dir, segmentPrefix string) (RecoverResult, error) {
+	namer := segmentNamer{dir: dir, prefix: segmentPrefix}
+	segmentsNumbers, err := findSegmentNumbers(dir, namer)
 	if err != nil {
 		return RecoverResult{}, errors.Wrap(err, "failed to find segment numbers")
 	}

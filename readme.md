@@ -19,12 +19,13 @@ go get github.com/vadiminshakov/gowal
 
 ### Initialization
 
-To create a WAL instance, configure the segment prefix and rotation:
+To create a WAL instance, configure the log directory, segment prefix and rotation:
 
 ```go
 import "github.com/vadiminshakov/gowal"
 
 cfg := gowal.Config{
+    Dir:    "./log",
     Prefix: "segment_",
     SegmentThreshold: 1000,
     MaxSegments:      100,
@@ -121,7 +122,7 @@ It truncates the log before the first broken frame or frame containing an index 
 including the entire affected batch and all later segments:
 
 ```go
-result, err := gowal.UnsafeRecover("segment_")
+result, err := gowal.UnsafeRecover(cfg.Dir, "segment_")
 if err != nil {
     log.Fatal(err)
 }
@@ -131,9 +132,10 @@ log.Printf("Truncated: %q, removed: %v, last index: %d", result.Truncated, resul
 ### Configuration
 The behavior of the WAL can be configured using several configuration options (`Config` parameter in the `NewWAL` function):
 
+ - `Dir`: Directory where segment files are stored, including nested paths. Created automatically if needed. Default is `./log`.
  - `SegmentThreshold`: Number of log entries at which the next write rotates to a new segment. Batches are never split and may exceed this threshold. Default is 1000.
  - `MaxSegments`: Maximum number of segments to keep before the oldest segments are deleted. Default is 5.
- - `IsInSyncDiskMode`: When set to true, every successful write is synced to disk. In async mode (the default), recent writes can be lost on a crash; segments are synced before rotation and on successful Close. Segment creation and deletion always sync the directory, regardless of this setting. Creation of `./log` is persisted by syncing the current directory.
+ - `IsInSyncDiskMode`: When set to true, every successful write is synced to disk. In async mode (the default), recent writes can be lost on a crash; segments are synced before rotation and on successful Close. Segment creation and deletion always sync the directory, regardless of this setting. Creation of the log directory is persisted by syncing the parents of newly created directories.
 
 ## Architecture
 
