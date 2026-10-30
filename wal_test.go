@@ -506,9 +506,8 @@ func TestWriteTombstone(t *testing.T) {
 
 		// verify record doesn't exist
 		record, err := log.Get(999)
-		require.NoError(t, err)
-		require.Equal(t, "", record.Key)
-		require.Nil(t, record.Value)
+		require.ErrorIs(t, err, ErrNotFound)
+		require.Equal(t, Record{}, record)
 	})
 
 	t.Run("WriteTombstone for existing record", func(t *testing.T) {
@@ -521,6 +520,7 @@ func TestWriteTombstone(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "key1", record.Key)
 		require.Equal(t, "value1", string(record.Value))
+		require.False(t, record.Tombstone)
 
 		// write tombstone
 		err = log.WriteTombstone(1)
@@ -530,7 +530,8 @@ func TestWriteTombstone(t *testing.T) {
 		record, err = log.Get(1)
 		require.NoError(t, err)
 		require.Equal(t, "key1", record.Key)
-		require.Equal(t, "tombstone", string(record.Value))
+		require.Nil(t, record.Value)
+		require.True(t, record.Tombstone)
 	})
 
 	t.Run("WriteTombstone appears in iterator", func(t *testing.T) {
@@ -551,7 +552,8 @@ func TestWriteTombstone(t *testing.T) {
 		for record := range log.Iterator() {
 			if record.Index == 3 {
 				require.Equal(t, "key3", record.Key)
-				require.Equal(t, "tombstone", string(record.Value))
+				require.Nil(t, record.Value)
+				require.True(t, record.Tombstone)
 				found = true
 			}
 		}
@@ -564,7 +566,7 @@ func TestWriteTombstone(t *testing.T) {
 		record := NewRecord(5, "key5", []byte("value5"))
 		log.mu.Lock()
 		log.segments.historicalIndex[5] = record
-		log.segments.historicalIndexBySegment[0] = map[uint64]Record{5: record}
+		log.segments.indexesBySegment[0] = []uint64{5}
 		log.mu.Unlock()
 
 		// verify record exists in main index
@@ -581,7 +583,8 @@ func TestWriteTombstone(t *testing.T) {
 		record, err = log.Get(5)
 		require.NoError(t, err)
 		require.Equal(t, "key5", record.Key)
-		require.Equal(t, "tombstone", string(record.Value))
+		require.Nil(t, record.Value)
+		require.True(t, record.Tombstone)
 
 		// verify record is removed from main index
 		log.mu.RLock()
@@ -1062,6 +1065,59 @@ func TestCloseAfterWriteFailure(t *testing.T) {
 	require.ErrorIs(t, w.Write(NewRecord(1, "key", nil)), ErrFailed)
 	require.NoError(t, w.Close())
 	require.ErrorIs(t, file.Sync(), os.ErrClosed)
+}
+
+func TestOpenAndRecoverWhenFirstRemainingRecordIsTombstone(t *testing.T) {
+	testLogDir(t)
+	cfg := Config{Prefix: "log_", SegmentThreshold: 2, MaxSegments: 2, IsInSyncDiskMode: true}
+
+	w, err := NewWAL(cfg)
+	require.NoError(t, err)
+
+	// log_0: [1, 2]
+	require.NoError(t, w.Write(NewRecord(1, "k1", []byte("v1"))))
+	require.NoError(t, w.Write(NewRecord(2, "k2", []byte("v2"))))
+
+	// log_1: [tombstone(1), 3]
+	require.NoError(t, w.WriteTombstone(1))
+	require.NoError(t, w.Write(NewRecord(3, "k3", []byte("v3"))))
+
+	// log_2: [4] -> rotates and removes log_0, so log_1 (starting with tombstone(1) followed by 3) is first on disk
+	require.NoError(t, w.Write(NewRecord(4, "k4", []byte("v4"))))
+	require.NoError(t, w.Close())
+
+	result, err := UnsafeRecover(logDir, "log_")
+	require.NoError(t, err)
+	require.Equal(t, RecoverResult{LastIndex: 4}, result)
+
+	w, err = NewWAL(cfg)
+	require.NoError(t, err)
+	defer w.Close()
+
+	require.Equal(t, uint64(4), w.CurrentIndex())
+	r1, err := w.Get(1)
+	require.NoError(t, err)
+	require.True(t, r1.Tombstone)
+	r3, err := w.Get(3)
+	require.NoError(t, err)
+	require.Equal(t, []byte("v3"), r3.Value)
+}
+
+func TestGetReturnsErrNotFound(t *testing.T) {
+	testLogDir(t)
+	w, err := NewWAL(Config{Prefix: "log_", SegmentThreshold: 1, MaxSegments: 2, IsInSyncDiskMode: true})
+	require.NoError(t, err)
+	defer w.Close()
+
+	_, err = w.Get(1)
+	require.ErrorIs(t, err, ErrNotFound)
+
+	require.NoError(t, w.Write(NewRecord(1, "k1", []byte("v1"))))
+	require.NoError(t, w.Write(NewRecord(2, "k2", []byte("v2"))))
+	require.NoError(t, w.Write(NewRecord(3, "k3", []byte("v3"))))
+
+	_, err = w.Get(1)
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 func testLogDir(t *testing.T) {

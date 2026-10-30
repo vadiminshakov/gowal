@@ -143,7 +143,7 @@ func scanFrames(r io.Reader, seq *indexSequence, fn func(Record)) (int64, error)
 		}
 		nextSeq := *seq
 		for _, record := range records {
-			if err := nextSeq.next(record.Index); err != nil {
+			if err := nextSeq.next(record); err != nil {
 				return validSize, err
 			}
 		}

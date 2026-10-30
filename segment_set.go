@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/pkg/errors"
 )
@@ -14,15 +15,15 @@ import (
 var errRotation = errors.New("segment rotation failed")
 
 type segmentSet struct {
-	namer                    segmentNamer
-	active                   *segment
-	activeNumber             segmentNumber
-	historicalIndex          map[uint64]Record
-	historicalIndexBySegment map[segmentNumber]map[uint64]Record
-	numbers                  []segmentNumber
-	next                     segmentNumber
-	threshold                int
-	max                      int
+	namer               segmentNamer
+	active              *segment
+	activeNumber        segmentNumber
+	historicalIndex     map[uint64]Record
+	indexesBySegment map[segmentNumber][]uint64
+	numbers             []segmentNumber
+	next                segmentNumber
+	threshold           int
+	max                 int
 }
 
 func openSegmentSet(config Config) (*segmentSet, uint64, error) {
@@ -33,56 +34,59 @@ func openSegmentSet(config Config) (*segmentSet, uint64, error) {
 		return nil, 0, errors.Wrap(err, "failed to find segment numbers")
 	}
 
-	active, historical, historicalBySegment, lastIndex, err := openSegments(numbers, namer)
+	s := &segmentSet{
+		namer:            namer,
+		activeNumber:     numbers[len(numbers)-1],
+		historicalIndex:  make(map[uint64]Record),
+		indexesBySegment: make(map[segmentNumber][]uint64),
+		numbers:          numbers,
+		next:             nextSegmentNumber(numbers),
+		threshold:        config.SegmentThreshold,
+		max:              config.MaxSegments,
+	}
+
+	lastIndex, err := s.openSegments()
 	if err != nil {
 		return nil, 0, errors.Wrap(err, "failed to load log segments")
 	}
 
-	return &segmentSet{
-		namer:                    namer,
-		active:                   active,
-		activeNumber:             numbers[len(numbers)-1],
-		historicalIndex:          historical,
-		historicalIndexBySegment: historicalBySegment,
-		numbers:                  numbers,
-		next:                     nextSegmentNumber(numbers),
-		threshold:                config.SegmentThreshold,
-		max:                      config.MaxSegments,
-	}, lastIndex, nil
+	return s, lastIndex, nil
 }
 
-func openSegments(numbers []segmentNumber, namer segmentNamer) (*segment, map[uint64]Record, map[segmentNumber]map[uint64]Record, uint64, error) {
-	historical := make(map[uint64]Record)
-	historicalBySegment := make(map[segmentNumber]map[uint64]Record)
-
+func (s *segmentSet) openSegments() (uint64, error) {
 	var lastIndex uint64
-	var active *segment
 	var seq indexSequence
 
-	for i, number := range numbers {
-		s, err := openSegment(namer.path(number), i == len(numbers)-1, &seq)
+	for i, number := range s.numbers {
+		seg, err := openSegment(s.namer.path(number), i == len(s.numbers)-1, &seq)
 		if err != nil {
-			return nil, nil, nil, 0, errors.Wrap(err, "failed to load indexes from record log file")
+			return 0, errors.Wrap(err, "failed to load indexes from record log file")
 		}
-		if s.LastIndex() > lastIndex {
-			lastIndex = s.LastIndex()
+		if seg.LastIndex() > lastIndex {
+			lastIndex = seg.LastIndex()
 		}
 
-		if i < len(numbers)-1 {
-			maps.Copy(historical, s.index)
-			historicalBySegment[number] = s.index
+		for idx := range seg.index {
+			s.forgetHistorical(idx)
+		}
 
-			if err := s.Close(); err != nil {
-				return nil, nil, nil, 0, errors.Wrap(err, "failed to close historical segment")
+		if i < len(s.numbers)-1 {
+			maps.Copy(s.historicalIndex, seg.index)
+			if len(seg.index) > 0 {
+				s.indexesBySegment[number] = slices.Collect(maps.Keys(seg.index))
+			}
+
+			if err := seg.Close(); err != nil {
+				return 0, errors.Wrap(err, "failed to close historical segment")
 			}
 
 			continue
 		}
 
-		active = s
+		s.active = seg
 	}
 
-	return active, historical, historicalBySegment, lastIndex, nil
+	return lastIndex, nil
 }
 
 func (s *segmentSet) append(records []Record, sync bool) error {
@@ -135,11 +139,13 @@ func (s *segmentSet) forgetHistorical(index uint64) {
 	}
 
 	delete(s.historicalIndex, index)
-	for number, segmentIndex := range s.historicalIndexBySegment {
-		delete(segmentIndex, index)
-		if len(segmentIndex) == 0 {
-			delete(s.historicalIndexBySegment, number)
+	for number, indexes := range s.indexesBySegment {
+		indexes = slices.DeleteFunc(indexes, func(idx uint64) bool { return idx == index })
+		if len(indexes) == 0 {
+			delete(s.indexesBySegment, number)
+			continue
 		}
+		s.indexesBySegment[number] = indexes
 	}
 }
 
@@ -163,7 +169,9 @@ func (s *segmentSet) rotateIfNeeded() error {
 
 	old := s.active
 	maps.Copy(s.historicalIndex, old.index)
-	s.historicalIndexBySegment[s.activeNumber] = old.index
+	if len(old.index) > 0 {
+		s.indexesBySegment[s.activeNumber] = slices.Collect(maps.Keys(old.index))
+	}
 
 	s.active = active
 	s.activeNumber = s.next
@@ -186,19 +194,14 @@ func (s *segmentSet) removeExtraSegments() error {
 }
 
 func (s *segmentSet) removeSegment(number segmentNumber) error {
-	segmentIndex := s.historicalIndexBySegment[number]
-
 	if err := removeSegmentFile(s.namer.path(number)); err != nil {
 		return err
 	}
 
-	for idx, removed := range segmentIndex {
-		current, ok := s.historicalIndex[idx]
-		if ok && current.sameRecord(removed) {
-			delete(s.historicalIndex, idx)
-		}
+	for _, idx := range s.indexesBySegment[number] {
+		delete(s.historicalIndex, idx)
 	}
-	delete(s.historicalIndexBySegment, number)
+	delete(s.indexesBySegment, number)
 
 	return nil
 }

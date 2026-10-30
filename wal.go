@@ -13,9 +13,14 @@ import (
 	"github.com/pkg/errors"
 )
 
-const logDir = "log"
+const (
+	logDir                  = "log"
+	defaultSegmentThreshold = 1000
+	defaultMaxSegments      = 5
+)
 
 var (
+	ErrNotFound           = errors.New("record not found")
 	ErrExists             = errors.New("record with such index already exists")
 	ErrNonSequentialIndex = errors.New("record index must be next in sequence")
 
@@ -71,6 +76,12 @@ type Config struct {
 func NewWAL(config Config) (*Wal, error) {
 	if config.Dir == "" {
 		config.Dir = logDir
+	}
+	if config.SegmentThreshold <= 0 {
+		config.SegmentThreshold = defaultSegmentThreshold
+	}
+	if config.MaxSegments <= 0 {
+		config.MaxSegments = defaultMaxSegments
 	}
 
 	if err := createLogDir(config.Dir); err != nil {
@@ -144,16 +155,17 @@ func UnsafeRecover(dir, segmentPrefix string) (RecoverResult, error) {
 }
 
 // Get queries record at specific index in the log.
+// It returns ErrNotFound if no record with this index exists in the WAL.
 func (c *Wal) Get(index uint64) (Record, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	record, ok := c.segments.record(index)
-	if ok {
-		return record.clone(), nil
+	if !ok {
+		return Record{}, ErrNotFound
 	}
 
-	return Record{}, nil
+	return record.clone(), nil
 }
 
 // CurrentIndex returns current index of the log.

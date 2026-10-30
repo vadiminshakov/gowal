@@ -42,7 +42,7 @@ defer wal.Close()
 ### Adding a log entry
 You can append a new log entry by providing an index, a key, and a value. Indexes start at `1` and must increase monotonically with each write:
 ```go
-err := wal.Write(1, "myKey", []byte("myValue"))
+err := wal.Write(gowal.NewRecord(1, "myKey", []byte("myValue")))
 if err != nil {
     log.Fatal(err)
 }
@@ -78,14 +78,14 @@ async mode can lose recent batches on a crash. After an I/O error, recovery may 
 
 ### Retrieving a log entry
 
-You can retrieve a log entry by its index:
+You can retrieve a log entry by its index. If the entry does not exist (was never written or was removed during segment rotation), `Get` returns `ErrNotFound`:
 
 ```go
-key, value, err := wal.Get(1)
+record, err := wal.Get(1)
 if err != nil {
     log.Println("Entry not found or error:", err)
 } else {
-    log.Printf("Key: %s, Value: %s", key, string(value))
+    log.Printf("Key: %s, Value: %s", record.Key, string(record.Value))
 }
 ```
 
@@ -171,10 +171,10 @@ sync error stops the WAL with `ErrFailed`; the pending record is not appended. U
 syncs the directory after each deletion and returns any error.
 
 #### Read Operations
-Lookups check both indexes:
+Lookups check both in-memory indexes (checksums are verified when segments are loaded from disk):
 1. Check the active segment index first (current segment, smaller and more likely to contain recent data)
 2. If not found, check the historical index
-3. Verify checksum before returning data
+3. Return `ErrNotFound` if the index is not present in either index
 
 ### Contributing
 Feel free to open issues or submit pull requests for improvements and bug fixes. We welcome contributions!

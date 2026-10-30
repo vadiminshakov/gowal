@@ -6,22 +6,39 @@ import "github.com/pkg/errors"
 var ErrIndexGap = errors.New("gap in log indexes")
 
 // indexSequence checks that records read from the log form a contiguous sequence.
-// A record with an index not greater than the last one is a tombstone and is allowed.
-// The first record of the log may have any index, because the oldest segments may have been removed.
 type indexSequence struct {
 	last    uint64
 	started bool
 }
 
-func (s *indexSequence) next(index uint64) error {
-	if s.started && index > s.last+1 {
-		return errors.Wrapf(ErrIndexGap, "expected index %d, got %d", s.last+1, index)
+func (s *indexSequence) next(record Record) error {
+	if record.Index == 0 {
+		return errors.Wrap(ErrIndexGap, "record index must be greater than 0")
 	}
 
-	if !s.started || index > s.last {
-		s.last = index
+	if record.Tombstone {
+		if s.started && record.Index > s.last {
+			return errors.Wrapf(ErrIndexGap, "tombstone index %d exceeds last index %d", record.Index, s.last)
+		}
+		if !s.started && record.Index > s.last {
+			s.last = record.Index
+		}
+		return nil
 	}
-	s.started = true
 
+	if !s.started {
+		if record.Index <= s.last {
+			return errors.Wrapf(ErrIndexGap, "expected index after %d, got %d", s.last, record.Index)
+		}
+		s.last = record.Index
+		s.started = true
+		return nil
+	}
+
+	if record.Index != s.last+1 {
+		return errors.Wrapf(ErrIndexGap, "expected index %d, got %d", s.last+1, record.Index)
+	}
+
+	s.last = record.Index
 	return nil
 }
